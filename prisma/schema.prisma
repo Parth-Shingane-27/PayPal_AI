@@ -1,0 +1,450 @@
+// GlobalCart data model. Money is always integer minor units plus an ISO
+// currency code. Table and column names are snake_case.
+
+generator client {
+  provider     = "prisma-client"
+  output       = "../src/generated/prisma"
+  moduleFormat = "esm"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ---------------------------------------------------------------------------
+// Enums
+// ---------------------------------------------------------------------------
+
+enum ListingStatus {
+  DRAFT
+  PUBLISHED
+  ARCHIVED
+}
+
+enum OrderStatus {
+  CART
+  PENDING_PAYMENT
+  PAID
+  PARTIALLY_REFUNDED
+  REFUNDED
+}
+
+/// CREATED: PayPal order exists, buyer has not paid. PENDING: capture pending
+/// at PayPal. Only CREATED and PENDING may move forward.
+enum PaymentStatus {
+  CREATED
+  PENDING
+  COMPLETED
+  DECLINED
+  FAILED
+  VOIDED
+}
+
+enum RefundStatus {
+  PROPOSED
+  REJECTED
+  PENDING
+  COMPLETED
+  FAILED
+}
+
+enum PayoutScheduleStatus {
+  PROPOSED
+  APPROVED
+  REJECTED
+}
+
+enum PayoutStatus {
+  PROPOSED
+  SCHEDULED
+  PROCESSING
+  SUCCESS
+  FAILED
+  CANCELLED
+}
+
+enum AgentName {
+  LISTING
+  SHOPPING
+  TREASURY
+  OPERATIONS
+}
+
+enum ActorType {
+  SELLER
+  BUYER
+  SYSTEM
+}
+
+enum AgentSessionStatus {
+  IDLE
+  RUNNING
+}
+
+/// TOOL: a tool call (proposals are TOOL rows that wait for approval).
+/// PAYPAL: an outbound PayPal API call. MODEL: token usage for one agent run.
+enum ActionKind {
+  TOOL
+  PAYPAL
+  MODEL
+}
+
+enum ActionStatus {
+  SUCCEEDED
+  FAILED
+  PENDING_APPROVAL
+  APPROVED
+  REJECTED
+  EXECUTED
+  EXECUTION_FAILED
+}
+
+enum WebhookStatus {
+  RECEIVED
+  PROCESSED
+  IGNORED
+  FAILED
+}
+
+// ---------------------------------------------------------------------------
+// People
+// ---------------------------------------------------------------------------
+
+model Seller {
+  id           String   @id @default(uuid(7)) @db.Uuid
+  name         String
+  email        String   @unique
+  /// PayPal account that receives payouts.
+  paypal_email String
+  /// ISO 3166-1 alpha-2, used to decide whether a sale is international.
+  country      String   @db.Char(2)
+  /// Home currency: a listing in another currency carries a conversion spread.
+  currency     String   @db.Char(3)
+  /// UI and agent reply language, e.g. "en-US", "de-DE".
+  locale       String
+  created_at   DateTime @default(now()) @db.Timestamptz(3)
+
+  products         Product[]
+  listings         Listing[]
+  orders           Order[]
+  payments         Payment[]
+  refunds          Refund[]
+  payout_schedules PayoutSchedule[]
+  payouts          Payout[]
+  agent_sessions   AgentSession[]
+  agent_actions    AgentAction[]
+
+  @@map("sellers")
+}
+
+model Buyer {
+  id         String   @id @default(uuid(7)) @db.Uuid
+  name       String
+  email      String   @unique
+  /// Default market; the session can override it from the market picker.
+  locale     String
+  country    String   @db.Char(2)
+  created_at DateTime @default(now()) @db.Timestamptz(3)
+
+  orders         Order[]
+  agent_sessions AgentSession[]
+
+  @@map("buyers")
+}
+
+// ---------------------------------------------------------------------------
+// Catalogue
+// ---------------------------------------------------------------------------
+
+model Product {
+  id             String   @id @default(uuid(7)) @db.Uuid
+  seller_id      String   @db.Uuid
+  sku            String
+  /// Source-language title and description, written by the seller.
+  title          String
+  description    String
+  source_locale  String
+  cost_minor     Int
+  cost_currency  String   @db.Char(3)
+  /// Shipping cost to any market, in cost_currency. Prices include shipping.
+  shipping_minor Int      @default(0)
+  /// Target profit as a share of the selling price, in basis points.
+  margin_bps     Int
+  /// Facts about the product (weight_kg, dimensions_cm, material, ...).
+  attributes     Json     @default("{}")
+  image_url      String?
+  created_at     DateTime @default(now()) @db.Timestamptz(3)
+  updated_at     DateTime @updatedAt @db.Timestamptz(3)
+
+  seller   Seller    @relation(fields: [seller_id], references: [id])
+  listings Listing[]
+
+  @@unique([seller_id, sku])
+  @@index([seller_id])
+  @@map("products")
+}
+
+model Listing {
+  id           String                       @id @default(uuid(7)) @db.Uuid
+  product_id   String                       @db.Uuid
+  seller_id    String                       @db.Uuid
+  locale       String
+  currency     String                       @db.Char(3)
+  title        String
+  description  String
+  seo_title    String
+  price_minor  Int
+  status       ListingStatus                @default(DRAFT)
+  /// The suggest_price result the price came from (null if set by hand).
+  pricing      Json?
+  embedding    Unsupported("vector(1024)")?
+  embedded_at  DateTime?                    @db.Timestamptz(3)
+  published_at DateTime?                    @db.Timestamptz(3)
+  created_at   DateTime                     @default(now()) @db.Timestamptz(3)
+  updated_at   DateTime                     @updatedAt @db.Timestamptz(3)
+
+  product     Product     @relation(fields: [product_id], references: [id])
+  seller      Seller      @relation(fields: [seller_id], references: [id])
+  order_items OrderItem[]
+
+  @@unique([product_id, locale])
+  @@index([locale, status])
+  @@index([seller_id])
+  @@map("listings")
+}
+
+// ---------------------------------------------------------------------------
+// Orders and money
+// ---------------------------------------------------------------------------
+
+/// One seller and one currency per order. A cart is an order in status CART,
+/// at most one per (buyer, seller, currency), enforced by locking the buyer row.
+model Order {
+  id         String      @id @default(uuid(7)) @db.Uuid
+  buyer_id   String      @db.Uuid
+  seller_id  String      @db.Uuid
+  currency   String      @db.Char(3)
+  /// Market the order was placed in, e.g. "ja-JP".
+  locale     String
+  status     OrderStatus @default(CART)
+  /// Shipping details returned by PayPal at capture.
+  shipping   Json?
+  paid_at    DateTime?   @db.Timestamptz(3)
+  created_at DateTime    @default(now()) @db.Timestamptz(3)
+  updated_at DateTime    @updatedAt @db.Timestamptz(3)
+
+  buyer    Buyer       @relation(fields: [buyer_id], references: [id])
+  seller   Seller      @relation(fields: [seller_id], references: [id])
+  items    OrderItem[]
+  payments Payment[]
+  refunds  Refund[]
+
+  @@index([buyer_id, status])
+  @@index([seller_id, status])
+  @@map("orders")
+}
+
+model OrderItem {
+  id               String @id @default(uuid(7)) @db.Uuid
+  order_id         String @db.Uuid
+  listing_id       String @db.Uuid
+  /// Snapshot of the listing at the time it was added / checked out.
+  title            String
+  sku              String
+  unit_price_minor Int
+  quantity         Int
+
+  order   Order   @relation(fields: [order_id], references: [id], onDelete: Cascade)
+  listing Listing @relation(fields: [listing_id], references: [id])
+
+  @@unique([order_id, listing_id])
+  @@map("order_items")
+}
+
+/// One row per PayPal order attempt. Fee columns are filled at capture.
+model Payment {
+  id                  String        @id @default(uuid(7)) @db.Uuid
+  order_id            String        @db.Uuid
+  /// Denormalised from the order so ledger sums need no join.
+  seller_id           String        @db.Uuid
+  paypal_order_id     String        @unique
+  /// PayPal "payer-action" link, kept so a pending order can be reused.
+  approve_url         String?
+  /// `${orderId}-${uuid}`: used as invoice_id and PayPal-Request-Id.
+  invoice_id          String        @unique
+  status              PaymentStatus @default(CREATED)
+  currency            String        @db.Char(3)
+  gross_minor         Int
+  paypal_fee_minor    Int?
+  /// True when PayPal's fee was missing or in another currency and the
+  /// estimate table was used instead.
+  fee_is_estimate     Boolean       @default(false)
+  platform_fee_minor  Int?
+  fx_cost_minor       Int?
+  net_to_seller_minor Int?
+  capture_id          String?       @unique
+  failure_reason      String?
+  captured_at         DateTime?     @db.Timestamptz(3)
+  created_at          DateTime      @default(now()) @db.Timestamptz(3)
+  updated_at          DateTime      @updatedAt @db.Timestamptz(3)
+
+  order   Order    @relation(fields: [order_id], references: [id])
+  seller  Seller   @relation(fields: [seller_id], references: [id])
+  refunds Refund[]
+
+  @@index([order_id])
+  @@index([seller_id, status])
+  @@index([status])
+  @@map("payments")
+}
+
+model Refund {
+  id                          String       @id @default(uuid(7)) @db.Uuid
+  payment_id                  String       @db.Uuid
+  order_id                    String       @db.Uuid
+  seller_id                   String       @db.Uuid
+  currency                    String       @db.Char(3)
+  amount_minor                Int
+  reason                      String
+  status                      RefundStatus @default(PROPOSED)
+  paypal_refund_id            String?      @unique
+  paypal_fee_returned_minor   Int?
+  platform_fee_returned_minor Int?
+  seller_debit_minor          Int?
+  error                       String?
+  created_at                  DateTime     @default(now()) @db.Timestamptz(3)
+  completed_at                DateTime?    @db.Timestamptz(3)
+
+  payment       Payment       @relation(fields: [payment_id], references: [id])
+  order         Order         @relation(fields: [order_id], references: [id])
+  seller        Seller        @relation(fields: [seller_id], references: [id])
+  agent_actions AgentAction[]
+
+  @@index([seller_id, status])
+  @@index([payment_id])
+  @@map("refunds")
+}
+
+model PayoutSchedule {
+  id         String               @id @default(uuid(7)) @db.Uuid
+  seller_id  String               @db.Uuid
+  currency   String               @db.Char(3)
+  status     PayoutScheduleStatus @default(PROPOSED)
+  created_at DateTime             @default(now()) @db.Timestamptz(3)
+
+  seller        Seller        @relation(fields: [seller_id], references: [id])
+  payouts       Payout[]
+  agent_actions AgentAction[]
+
+  @@index([seller_id])
+  @@map("payout_schedules")
+}
+
+model Payout {
+  id              String       @id @default(uuid(7)) @db.Uuid
+  schedule_id     String       @db.Uuid
+  seller_id       String       @db.Uuid
+  currency        String       @db.Char(3)
+  amount_minor    Int
+  /// Estimated when proposed; replaced by PayPal's actual fee when known.
+  fee_minor       Int
+  fee_is_estimate Boolean      @default(true)
+  receiver_email  String
+  scheduled_for   DateTime     @db.Timestamptz(3)
+  status          PayoutStatus @default(PROPOSED)
+  /// Idempotency key for POST /v1/payments/payouts.
+  sender_batch_id String       @unique
+  paypal_batch_id String?      @unique
+  error           String?
+  completed_at    DateTime?    @db.Timestamptz(3)
+  created_at      DateTime     @default(now()) @db.Timestamptz(3)
+  updated_at      DateTime     @updatedAt @db.Timestamptz(3)
+
+  schedule PayoutSchedule @relation(fields: [schedule_id], references: [id])
+  seller   Seller         @relation(fields: [seller_id], references: [id])
+
+  @@index([seller_id, status])
+  @@map("payouts")
+}
+
+// ---------------------------------------------------------------------------
+// Agents and audit
+// ---------------------------------------------------------------------------
+
+model AgentSession {
+  id             String             @id @default(uuid(7)) @db.Uuid
+  agent          AgentName
+  actor          ActorType
+  seller_id      String?            @db.Uuid
+  buyer_id       String?            @db.Uuid
+  locale         String
+  /// The full Claude message history, append-only.
+  messages       Json               @default("[]")
+  status         AgentSessionStatus @default(IDLE)
+  /// When the current run started; a stale RUNNING session can be reclaimed.
+  run_started_at DateTime?          @db.Timestamptz(3)
+  /// Session that handed off to this one, if any.
+  parent_id      String?            @db.Uuid
+  created_at     DateTime           @default(now()) @db.Timestamptz(3)
+  updated_at     DateTime           @updatedAt @db.Timestamptz(3)
+
+  seller        Seller?        @relation(fields: [seller_id], references: [id])
+  buyer         Buyer?         @relation(fields: [buyer_id], references: [id])
+  parent        AgentSession?  @relation("Handoff", fields: [parent_id], references: [id])
+  children      AgentSession[] @relation("Handoff")
+  agent_actions AgentAction[]
+
+  @@index([seller_id])
+  @@index([buyer_id])
+  @@map("agent_sessions")
+}
+
+/// Audit log and approval queue. A proposal is a PENDING_APPROVAL row linked
+/// to a refund or payout schedule, created in the same transaction.
+model AgentAction {
+  id                 String       @id @default(uuid(7)) @db.Uuid
+  kind               ActionKind
+  agent              AgentName?
+  tool               String
+  input              Json
+  output             Json?
+  status             ActionStatus
+  error              String?
+  rationale          String?
+  actor              ActorType
+  actor_id           String?      @db.Uuid
+  seller_id          String?      @db.Uuid
+  session_id         String?      @db.Uuid
+  refund_id          String?      @db.Uuid
+  payout_schedule_id String?      @db.Uuid
+  decided_by         String?      @db.Uuid
+  decided_at         DateTime?    @db.Timestamptz(3)
+  duration_ms        Int?
+  created_at         DateTime     @default(now()) @db.Timestamptz(3)
+
+  seller          Seller?         @relation(fields: [seller_id], references: [id])
+  session         AgentSession?   @relation(fields: [session_id], references: [id])
+  refund          Refund?         @relation(fields: [refund_id], references: [id])
+  payout_schedule PayoutSchedule? @relation(fields: [payout_schedule_id], references: [id])
+
+  @@index([seller_id, created_at])
+  @@index([session_id, created_at])
+  @@index([status])
+  @@map("agent_actions")
+}
+
+model WebhookEvent {
+  /// PayPal event id; storing it as the key makes delivery idempotent.
+  id            String        @id
+  event_type    String
+  resource_type String?
+  resource_id   String?
+  payload       Json
+  status        WebhookStatus @default(RECEIVED)
+  error         String?
+  received_at   DateTime      @default(now()) @db.Timestamptz(3)
+  processed_at  DateTime?     @db.Timestamptz(3)
+
+  @@index([status])
+  @@map("webhook_events")
+}
