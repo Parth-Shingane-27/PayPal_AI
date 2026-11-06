@@ -48,7 +48,7 @@ export default function TreasuryPage() {
     <div className="space-y-6">
       <section>
         <h1 className="mb-2 text-xl font-semibold">Balances</h1>
-        {notice && <p className={`mb-2 rounded p-2 text-sm ${notice.tone === "ok" ? "bg-emerald-50 text-emerald-800" : "bg-red-50 text-red-800"}`}>{notice.text}</p>}
+        {notice && <p className={`mb-2 rounded p-2 text-sm ${notice.tone === "ok" ? "bg-positive-soft text-positive-ink" : "bg-red-50 text-red-800"}`}>{notice.text}</p>}
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
           {balances.length === 0 && <p className="text-sm text-slate-500">No captured sales yet.</p>}
           {balances.map((b) => (
@@ -59,7 +59,7 @@ export default function TreasuryPage() {
                 Earned {b.earned.display} · refunded {b.refunded.display} · paid out {b.paid_out.display} · reserved {b.reserved_for_scheduled_payouts.display}
               </p>
               <button
-                className="mt-3 rounded bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50"
+                className="mt-3 rounded bg-accent px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50"
                 disabled={paying !== null || b.available.amount_minor <= 0}
                 onClick={() => payOut(b)}
               >

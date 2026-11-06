@@ -1,5 +1,7 @@
 import { ChatPanel } from "@/components/ChatPanel";
 
+export const metadata = { title: "Assistant" };
+
 export default function AssistantPage() {
   return (
     <ChatPanel

@@ -87,7 +87,7 @@ export default function ApprovalsPage() {
           </details>
           {a.status === "PENDING_APPROVAL" && (
             <div className="mt-3 flex gap-2">
-              <button disabled={busy === a.id} className="rounded bg-emerald-600 px-4 py-1.5 text-white disabled:opacity-50" onClick={() => decide(a.id, "approve")}>
+              <button disabled={busy === a.id} className="rounded bg-accent px-4 py-1.5 text-white disabled:opacity-50" onClick={() => decide(a.id, "approve")}>
                 Approve
               </button>
               <button disabled={busy === a.id} className="rounded border px-4 py-1.5 disabled:opacity-50" onClick={() => decide(a.id, "reject")}>

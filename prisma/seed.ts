@@ -6,11 +6,12 @@ import { estimateSaleFees } from "../src/server/domain/fees";
 import { getMarket } from "../src/server/domain/markets";
 import { applyBps } from "../src/server/domain/money";
 import { closeQueues, enqueueEmbedding } from "../src/server/queue";
+import { type SeedSeller, seedMarketplace } from "./seed/marketplace";
 
 /**
- * Demo data: 2 sellers, 3 buyers, 4 products with hand-written listings, and a
- * short order history so the Treasury and Operations agents have something to
- * work with. Needs no API keys; embeddings are queued for the worker.
+ * Demo data: 10 sellers, 10 buyers, 4 products with hand-written listings (the
+ * 8 extra sellers each have one unlisted product), and a short order history
+ * so the Treasury and Operations agents have something to work with. Needs no API keys; embeddings are queued for the worker.
  *
  * Historical payments are seed data, not real PayPal captures: their capture
  * ids start with "SEED-" and their fees are marked as estimates.
@@ -229,6 +230,32 @@ const DE_PRODUCTS: ProductSeed[] = [
   },
 ];
 
+/**
+ * Extra test accounts so there are 10 sellers and 10 buyers in total. There is
+ * no real auth here: the demo login screen lets you click any of them. Their
+ * catalogue and history come from prisma/seed/marketplace.ts.
+ */
+const EXTRA_SELLERS: { slug: string; name: string; country: string; currency: string; locale: string }[] = [
+  { slug: "gb", name: "Thames & Tweed", country: "GB", currency: "GBP", locale: "en-GB" },
+  { slug: "ca", name: "Northern Maple Co", country: "CA", currency: "CAD", locale: "en-CA" },
+  { slug: "au", name: "Outback Leatherworks", country: "AU", currency: "AUD", locale: "en-AU" },
+  { slug: "fr", name: "Atelier Provence", country: "FR", currency: "EUR", locale: "fr-FR" },
+  { slug: "es", name: "Cerámica Sevilla", country: "ES", currency: "EUR", locale: "es-ES" },
+  { slug: "it", name: "Bottega Toscana", country: "IT", currency: "EUR", locale: "it-IT" },
+  { slug: "mx", name: "Taller Oaxaca", country: "MX", currency: "MXN", locale: "es-MX" },
+  { slug: "jp", name: "Kyoto Craft House", country: "JP", currency: "JPY", locale: "ja-JP" },
+];
+
+const EXTRA_BUYERS: { slug: string; name: string; locale: string; country: string }[] = [
+  { slug: "arjun", name: "Arjun Kapoor", locale: "en-GB", country: "GB" },
+  { slug: "neha", name: "Neha Gupta", locale: "de-DE", country: "DE" },
+  { slug: "vikram", name: "Vikram Singh", locale: "fr-FR", country: "FR" },
+  { slug: "kavya", name: "Kavya Nair", locale: "es-ES", country: "ES" },
+  { slug: "aditya", name: "Aditya Verma", locale: "en-CA", country: "CA" },
+  { slug: "ishaan", name: "Ishaan Reddy", locale: "es-MX", country: "MX" },
+  { slug: "meera", name: "Meera Joshi", locale: "en-AU", country: "AU" },
+];
+
 const DAY = 24 * 60 * 60 * 1000;
 
 async function main() {
@@ -236,7 +263,7 @@ async function main() {
   if (cfg.NODE_ENV === "production") throw new Error("Refusing to seed a production database.");
 
   await prisma.$executeRawUnsafe(`TRUNCATE TABLE
-    agent_actions, agent_sessions, webhook_events, payouts, payout_schedules, refunds, payments,
+    messages, conversations, listing_daily_stats, agent_actions, agent_sessions, webhook_events, payouts, payout_schedules, refunds, payments,
     order_items, orders, listings, products, buyers, sellers RESTART IDENTITY CASCADE`);
 
   const sellerUs = await prisma.seller.create({
@@ -261,10 +288,28 @@ async function main() {
   });
 
   const [ava, priya, haruto] = await Promise.all([
-    prisma.buyer.create({ data: { name: "Ava Thompson", email: "ava@globalcart.test", locale: "en-US", country: "US" } }),
+    prisma.buyer.create({ data: { name: "Ananya Iyer", email: "ava@globalcart.test", locale: "en-US", country: "US" } }),
     prisma.buyer.create({ data: { name: "Priya Sharma", email: "priya@globalcart.test", locale: "hi-IN", country: "IN" } }),
-    prisma.buyer.create({ data: { name: "Haruto Sato", email: "haruto@globalcart.test", locale: "ja-JP", country: "JP" } }),
+    prisma.buyer.create({ data: { name: "Rohan Mehta", email: "haruto@globalcart.test", locale: "ja-JP", country: "JP" } }),
   ]);
+
+  const extraSellers: SeedSeller[] = [];
+  for (const s of EXTRA_SELLERS) {
+    const seller = await prisma.seller.create({
+      data: {
+        name: s.name,
+        email: `seller.${s.slug}@globalcart.test`,
+        paypal_email: `seller-${s.slug}-payouts@personal.example.com`,
+        country: s.country,
+        currency: s.currency,
+        locale: s.locale,
+      },
+    });
+    extraSellers.push({ slug: s.slug, ...seller });
+  }
+  for (const b of EXTRA_BUYERS) {
+    await prisma.buyer.create({ data: { name: b.name, email: `${b.slug}@globalcart.test`, locale: b.locale, country: b.country } });
+  }
 
   const listingIds: Record<string, string> = {};
   const published: string[] = [];
@@ -464,12 +509,35 @@ async function main() {
     }
   }
 
-  for (const id of published) await enqueueEmbedding(id);
+  const started = Date.now();
+  const buyers = await prisma.buyer.findMany();
+  const generated = await seedMarketplace({
+    sellers: [{ slug: "us", ...sellerUs }, { slug: "de", ...sellerDe }, ...extraSellers],
+    buyers,
+    platformBps: cfg.PLATFORM_FEE_BPS,
+  });
 
+  // Only the hand-written legacy listings are embedded by default; the eval's
+  // searches rely on them. SEED_EMBED=all queues every published listing.
+  const toEmbed =
+    process.env.SEED_EMBED === "all"
+      ? (await prisma.listing.findMany({ where: { status: "PUBLISHED" }, select: { id: true } })).map((l) => l.id)
+      : published;
+  for (const id of toEmbed) await enqueueEmbedding(id);
+
+  const [sellers, products, listings, orders, conversations, messages] = await Promise.all([
+    prisma.seller.count(),
+    prisma.product.count(),
+    prisma.listing.count(),
+    prisma.order.count(),
+    prisma.conversation.count(),
+    prisma.message.count(),
+  ]);
   console.log(
-    `Seeded 2 sellers, 3 buyers, ${US_PRODUCTS.length + DE_PRODUCTS.length} products, ` +
-      `${Object.keys(listingIds).length} listings (${published.length} published, embeddings queued), ` +
-      `${history.length} historical orders.`,
+    `Seeded ${sellers} sellers, ${buyers.length} buyers, ${products} products, ${listings} listings, ` +
+      `${orders} orders (${history.length} hand-written + ${generated.orders} generated, ${generated.refunds} generated refunds), ` +
+      `${generated.payouts} payouts, ${generated.stats} daily traffic rows, ${conversations} conversations with ${messages} messages. ` +
+      `Queued ${toEmbed.length} embeddings. ${((Date.now() - started) / 1000).toFixed(1)}s for generated data.`,
   );
 }
 

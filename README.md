@@ -25,7 +25,7 @@ cp .env.example .env             # then set SESSION_SECRET (openssl rand -hex 32
 npm run db:up                    # pgvector Postgres on :5433 (+ globalcart_test DB), Redis on :6380
 npm run db:migrate               # dev database
 npm run db:migrate:test          # test database
-npm run db:seed                  # 2 sellers, 3 buyers, 4 products, 14 listings, order history (no API keys needed)
+npm run db:seed                  # 10 sellers, 10 buyers, 52 products, ~330 listings, ~720 orders over 6 months, 60 buyer-seller threads (no API keys needed)
 npm run worker                   # terminal 1: webhooks + embeddings + payouts on :4000
 npm run dev                      # terminal 2: http://localhost:3000
 ```
@@ -52,6 +52,15 @@ npm run db:drift                                # must print "-- This is an empt
 npm run eval                                    # LIVE: spends Groq credit (see below)
 npm run eval -- --smoke                         # LIVE: one conversation per agent
 ```
+
+## Dashboards
+
+- **Seller overview** (`/seller`): KPIs against the previous period, the "where every sale went" fee anatomy, net earnings by month, markets, best sellers and buyers waiting on a reply. Totals in the seller's home currency use fixed reference rates (`src/server/domain/reference-rates.ts`); every sale keeps its own currency.
+- **Sales ledger** (`/seller/ledger`): AG Grid Community with Sales, Products, Buyers and Markets tabs. Quick filter, column filters, column chooser, CSV export, saved layout, pinned totals row, and an order drawer with the money trail.
+- **Messages** (`/seller/messages`, `/buyer/messages`): live buyer-seller threads. Seeded messages carry a translation into the other party's language; buyers start threads with "Ask the maker" in the shop.
+- **Buyer journal** (`/buyer`): passport of countries bought from, spending by month, purchases grid with how much reached the maker, and suggestions from the buyer's market.
+
+Seed data is deterministic (`prisma/seed/`). Only the original US/DE listings are queued for embeddings; run `SEED_EMBED=all npm run db:seed` to embed everything.
 
 ## How it fits together
 

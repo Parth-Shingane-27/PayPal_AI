@@ -16,8 +16,8 @@ export type ActivityRow = {
 };
 
 const STATUS_STYLE: Record<string, string> = {
-  SUCCEEDED: "bg-emerald-100 text-emerald-800",
-  EXECUTED: "bg-emerald-100 text-emerald-800",
+  SUCCEEDED: "bg-positive-soft text-positive-ink",
+  EXECUTED: "bg-positive-soft text-positive-ink",
   FAILED: "bg-red-100 text-red-800",
   EXECUTION_FAILED: "bg-red-100 text-red-800",
   PENDING_APPROVAL: "bg-amber-100 text-amber-800",

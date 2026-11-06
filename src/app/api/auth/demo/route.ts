@@ -14,7 +14,7 @@ export const POST = handler(async (req) => {
   const { role, id } = await readBody(req, bodySchema);
   const exists = role === "SELLER" ? await prisma.seller.findUnique({ where: { id } }) : await prisma.buyer.findUnique({ where: { id } });
   if (!exists) throw new AppError("NOT_FOUND", "Account not found.");
-  const res = NextResponse.json({ ok: true, role, redirect: role === "SELLER" ? "/seller/products" : "/shop" });
+  const res = NextResponse.json({ ok: true, role, redirect: role === "SELLER" ? "/seller" : "/buyer" });
   res.cookies.set(SESSION_COOKIE, signSession({ role, id, market: null }), cookieOptions());
   return res;
 });

@@ -81,15 +81,21 @@ export async function searchListings(locale: string, query: string, limit = 6, c
 export async function listPublishedListings(locale: string) {
   const listings = await prisma.listing.findMany({
     where: { locale, status: "PUBLISHED" },
-    include: { seller: true },
+    include: { seller: true, product: { select: { id: true, image_url: true, category: true, rating_avg: true, rating_count: true } } },
     orderBy: { title: "asc" },
   });
   return listings.map((l) => ({
     listing_id: l.id,
+    product_id: l.product.id,
     title: l.title,
     summary: l.description.length > 160 ? `${l.description.slice(0, 157)}...` : l.description,
     price: money(l.price_minor, l.currency, locale),
     seller: l.seller.name,
+    seller_country: l.seller.country,
+    image_url: l.product.image_url,
+    category: l.product.category,
+    rating: l.product.rating_avg,
+    rating_count: l.product.rating_count,
   }));
 }
 

@@ -358,7 +358,7 @@ const CASES: Case[] = [
       const out = called(res, "detect_anomalies")[0]?.output as { anomalies: { type: string }[] } | undefined;
       return [
         check(Boolean(out), "called detect_anomalies"),
-        check(!out?.anomalies.some((a) => a.type === "repeat_refunds") || /Haruto/i.test(reply(res)), "reported the repeat-refund buyer"),
+        check(!out?.anomalies.some((a) => a.type === "repeat_refunds") || /Rohan/i.test(reply(res)), "reported the repeat-refund buyer"),
         amountsAreGrounded(res, text),
       ];
     },

@@ -44,7 +44,7 @@ export function CartView({ paypalClientId, cancelled }: { paypalClientId: string
       <h1 className="text-xl font-semibold">Cart</h1>
       {cancelled && <p className="rounded bg-amber-50 p-2 text-sm text-amber-800">PayPal checkout was cancelled. Nothing was charged.</p>}
       {paid.map((o) => (
-        <p key={o.order_id} className="rounded bg-emerald-50 p-2 text-sm text-emerald-800">
+        <p key={o.order_id} className="rounded bg-positive-soft p-2 text-sm text-positive-ink">
           Paid {o.total.display}. Order status: {o.order_status}.
         </p>
       ))}

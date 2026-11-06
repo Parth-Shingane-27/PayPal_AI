@@ -99,6 +99,11 @@ enum ActionStatus {
   EXECUTION_FAILED
 }
 
+enum ConversationStatus {
+  OPEN
+  CLOSED
+}
+
 enum WebhookStatus {
   RECEIVED
   PROCESSED
@@ -133,6 +138,7 @@ model Seller {
   payouts          Payout[]
   agent_sessions   AgentSession[]
   agent_actions    AgentAction[]
+  conversations    Conversation[]
 
   @@map("sellers")
 }
@@ -148,6 +154,7 @@ model Buyer {
 
   orders         Order[]
   agent_sessions AgentSession[]
+  conversations  Conversation[]
 
   @@map("buyers")
 }
@@ -173,11 +180,17 @@ model Product {
   /// Facts about the product (weight_kg, dimensions_cm, material, ...).
   attributes     Json     @default("{}")
   image_url      String?
+  /// Catalogue facts shown on the dashboards.
+  category       String?
+  stock          Int      @default(0)
+  rating_avg     Float?
+  rating_count   Int      @default(0)
   created_at     DateTime @default(now()) @db.Timestamptz(3)
   updated_at     DateTime @updatedAt @db.Timestamptz(3)
 
-  seller   Seller    @relation(fields: [seller_id], references: [id])
-  listings Listing[]
+  seller        Seller         @relation(fields: [seller_id], references: [id])
+  listings      Listing[]
+  conversations Conversation[]
 
   @@unique([seller_id, sku])
   @@index([seller_id])
@@ -203,9 +216,10 @@ model Listing {
   created_at   DateTime                     @default(now()) @db.Timestamptz(3)
   updated_at   DateTime                     @updatedAt @db.Timestamptz(3)
 
-  product     Product     @relation(fields: [product_id], references: [id])
-  seller      Seller      @relation(fields: [seller_id], references: [id])
+  product     Product            @relation(fields: [product_id], references: [id])
+  seller      Seller             @relation(fields: [seller_id], references: [id])
   order_items OrderItem[]
+  daily_stats ListingDailyStat[]
 
   @@unique([product_id, locale])
   @@index([locale, status])
@@ -235,9 +249,10 @@ model Order {
 
   buyer    Buyer       @relation(fields: [buyer_id], references: [id])
   seller   Seller      @relation(fields: [seller_id], references: [id])
-  items    OrderItem[]
-  payments Payment[]
-  refunds  Refund[]
+  items         OrderItem[]
+  payments      Payment[]
+  refunds       Refund[]
+  conversations Conversation[]
 
   @@index([buyer_id, status])
   @@index([seller_id, status])
@@ -365,6 +380,68 @@ model Payout {
 
   @@index([seller_id, status])
   @@map("payouts")
+}
+
+// ---------------------------------------------------------------------------
+// Buyer-seller messaging and listing traffic
+// ---------------------------------------------------------------------------
+
+/// A thread between one buyer and one seller, optionally about a product or order.
+model Conversation {
+  id              String             @id @default(uuid(7)) @db.Uuid
+  seller_id       String             @db.Uuid
+  buyer_id        String             @db.Uuid
+  product_id      String?            @db.Uuid
+  order_id        String?            @db.Uuid
+  subject         String
+  status          ConversationStatus @default(OPEN)
+  last_message_at DateTime           @default(now()) @db.Timestamptz(3)
+  /// Messages the seller / buyer has not read yet.
+  seller_unread   Int                @default(0)
+  buyer_unread    Int                @default(0)
+  created_at      DateTime           @default(now()) @db.Timestamptz(3)
+  updated_at      DateTime           @updatedAt @db.Timestamptz(3)
+
+  seller   Seller    @relation(fields: [seller_id], references: [id])
+  buyer    Buyer     @relation(fields: [buyer_id], references: [id])
+  product  Product?  @relation(fields: [product_id], references: [id])
+  order    Order?    @relation(fields: [order_id], references: [id])
+  messages Message[]
+
+  @@index([seller_id, last_message_at])
+  @@index([buyer_id, last_message_at])
+  @@map("conversations")
+}
+
+model Message {
+  id              String    @id @default(uuid(7)) @db.Uuid
+  conversation_id String    @db.Uuid
+  /// SELLER or BUYER.
+  sender          ActorType
+  body            String
+  /// Language the body was written in, e.g. "hi-IN".
+  body_locale     String
+  /// Rendering in the other party's language, when they differ.
+  translation     String?
+  created_at      DateTime  @default(now()) @db.Timestamptz(3)
+
+  conversation Conversation @relation(fields: [conversation_id], references: [id], onDelete: Cascade)
+
+  @@index([conversation_id, created_at])
+  @@map("messages")
+}
+
+/// Daily storefront traffic per listing (views and add-to-cart clicks).
+model ListingDailyStat {
+  listing_id String   @db.Uuid
+  day        DateTime @db.Date
+  views      Int      @default(0)
+  cart_adds  Int      @default(0)
+
+  listing Listing @relation(fields: [listing_id], references: [id], onDelete: Cascade)
+
+  @@id([listing_id, day])
+  @@map("listing_daily_stats")
 }
 
 // ---------------------------------------------------------------------------

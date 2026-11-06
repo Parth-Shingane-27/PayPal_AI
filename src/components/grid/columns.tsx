@@ -1,0 +1,209 @@
+"use client";
+
+import type { ColDef, ValueFormatterParams, ValueGetterParams } from "ag-grid-community";
+import type { CustomCellRendererProps } from "ag-grid-react";
+import Link from "next/link";
+import { compareMoney, formatBps, formatCount, formatDate, type MoneyLike, ORDER_STATUS_LABEL } from "@/lib/format";
+import { IconMessages } from "../icons";
+import { CountryStamp, FeeBar, MarketStamp, Money, ProductThumb, Sparkline, StatusStamp } from "../ui";
+
+/**
+ * Column builders shared by the seller and buyer grids. Money cells keep the
+ * Money object as the value (exact minor units for sorting and CSV) and show
+ * the server-formatted display string.
+ */
+
+type Row = Record<string, unknown>;
+
+export function moneyCol<T extends Row>(field: keyof T & string, headerName: string, opts: Partial<ColDef<T>> & { tone?: "net" | "fee" | "muted"; estimateField?: keyof T & string } = {}): ColDef<T> {
+  const { tone, estimateField, ...rest } = opts;
+  return {
+    field: field as ColDef<T>["field"],
+    headerName,
+    type: "rightAligned",
+    width: 130,
+    comparator: (a: MoneyLike | null, b: MoneyLike | null) => compareMoney(a, b),
+    valueFormatter: (p: ValueFormatterParams<T, MoneyLike>) => p.value?.display ?? "",
+    getQuickFilterText: (p) => (p.value as MoneyLike | undefined)?.display ?? "",
+    filter: "agNumberColumnFilter",
+    filterValueGetter: (p: ValueGetterParams<T>) => {
+      const m = p.data?.[field] as MoneyLike | undefined;
+      if (!m) return null;
+      return m.amount_minor / 10 ** (m.currency === "JPY" ? 0 : 2);
+    },
+    cellRenderer: (p: CustomCellRendererProps<T, MoneyLike>) => (
+      <Money value={p.value} tone={tone} estimate={estimateField ? Boolean(p.data?.[estimateField]) && !p.node.rowPinned : false} />
+    ),
+    ...rest,
+  };
+}
+
+export function dateCol<T extends Row>(field: keyof T & string, headerName: string, opts: Partial<ColDef<T>> = {}): ColDef<T> {
+  return {
+    field: field as ColDef<T>["field"],
+    headerName,
+    width: 128,
+    filter: "agDateColumnFilter",
+    filterValueGetter: (p: ValueGetterParams<T>) => {
+      const v = p.data?.[field];
+      if (typeof v !== "string") return null;
+      const d = new Date(v);
+      return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
+    },
+    valueFormatter: (p: ValueFormatterParams<T, string>) => formatDate(p.value),
+    getQuickFilterText: (p) => formatDate(p.value as string),
+    cellClass: "num",
+    ...opts,
+  };
+}
+
+export function marketCol<T extends Row>(field: keyof T & string, headerName = "Market", opts: Partial<ColDef<T>> = {}): ColDef<T> {
+  return {
+    field: field as ColDef<T>["field"],
+    headerName,
+    width: 150,
+    cellRenderer: (p: CustomCellRendererProps<T, string>) => (p.value ? <MarketStamp locale={p.value} /> : null),
+    ...opts,
+  };
+}
+
+export function countryCol<T extends Row>(field: keyof T & string, headerName = "Country", opts: Partial<ColDef<T>> = {}): ColDef<T> {
+  return {
+    field: field as ColDef<T>["field"],
+    headerName,
+    width: 110,
+    cellRenderer: (p: CustomCellRendererProps<T, string>) => (p.value ? <CountryStamp country={p.value} /> : null),
+    ...opts,
+  };
+}
+
+export function statusCol<T extends Row>(field: keyof T & string, opts: Partial<ColDef<T>> = {}): ColDef<T> {
+  return {
+    field: field as ColDef<T>["field"],
+    headerName: "Status",
+    width: 150,
+    valueFormatter: (p: ValueFormatterParams<T, string>) => (p.value ? (ORDER_STATUS_LABEL[p.value] ?? p.value) : ""),
+    getQuickFilterText: (p) => ORDER_STATUS_LABEL[p.value as string] ?? "",
+    cellRenderer: (p: CustomCellRendererProps<T, string>) => (p.value ? <StatusStamp status={p.value} /> : null),
+    ...opts,
+  };
+}
+
+export function countCol<T extends Row>(field: keyof T & string, headerName: string, opts: Partial<ColDef<T>> = {}): ColDef<T> {
+  return {
+    field: field as ColDef<T>["field"],
+    headerName,
+    type: "rightAligned",
+    width: 104,
+    filter: "agNumberColumnFilter",
+    valueFormatter: (p: ValueFormatterParams<T, number>) => (typeof p.value === "number" ? formatCount(p.value) : ""),
+    cellClass: ["num", "ag-right-aligned-cell"],
+    ...opts,
+  };
+}
+
+export function bpsCol<T extends Row>(field: keyof T & string, headerName: string, opts: Partial<ColDef<T>> & { digits?: number } = {}): ColDef<T> {
+  const { digits = 1, ...rest } = opts;
+  return {
+    field: field as ColDef<T>["field"],
+    headerName,
+    type: "rightAligned",
+    width: 116,
+    filter: "agNumberColumnFilter",
+    filterValueGetter: (p: ValueGetterParams<T>) => {
+      const v = p.data?.[field];
+      return typeof v === "number" ? v / 100 : null;
+    },
+    valueFormatter: (p: ValueFormatterParams<T, number>) => (typeof p.value === "number" ? formatBps(p.value, digits) : ""),
+    cellClass: ["num", "ag-right-aligned-cell"],
+    ...rest,
+  };
+}
+
+/** Product cell: generated thumbnail, title, and a quiet second line. */
+export function productCol<T extends Row>(
+  titleField: keyof T & string,
+  imageField: keyof T & string,
+  sub: (row: T) => string,
+  opts: Partial<ColDef<T>> = {},
+): ColDef<T> {
+  return {
+    field: titleField as ColDef<T>["field"],
+    headerName: "Product",
+    pinned: "left",
+    lockPinned: true,
+    lockVisible: true,
+    // Narrower on phones so the pinned column leaves room to scroll the figures.
+    width: typeof window !== "undefined" && window.innerWidth < 640 ? 180 : 300,
+    minWidth: 160,
+    cellRenderer: (p: CustomCellRendererProps<T, string>) => {
+      if (p.node.rowPinned) return <span className="font-semibold">{p.value}</span>;
+      return (
+        <span className="flex h-full items-center gap-2.5 leading-tight">
+          <ProductThumb src={p.data?.[imageField] as string | null} alt="" size={34} />
+          <span className="min-w-0">
+            <span className="block truncate font-medium text-ink">{p.value}</span>
+            <span className="block truncate text-xs text-ink-3">{p.data ? sub(p.data) : ""}</span>
+          </span>
+        </span>
+      );
+    },
+    ...opts,
+  };
+}
+
+export function sparkCol<T extends Row>(field: keyof T & string, headerName: string, label: (row: T) => string): ColDef<T> {
+  return {
+    field: field as ColDef<T>["field"],
+    headerName,
+    width: 130,
+    sortable: false,
+    filter: false,
+    valueFormatter: (p: ValueFormatterParams<T, number[]>) => (Array.isArray(p.value) ? p.value.join(" ") : ""),
+    cellClass: "cell-overflow",
+    cellRenderer: (p: CustomCellRendererProps<T, number[]>) =>
+      p.value && p.data && !p.node.rowPinned ? (
+        <span className="flex h-full items-center">
+          <Sparkline values={p.value} label={label(p.data)} width={100} height={26} />
+        </span>
+      ) : null,
+  };
+}
+
+/** Mini fee anatomy for one sale. */
+export function feeBarCol<T extends Row>(get: (row: T) => { gross: number; net: number; paypal: number; platform: number; fx: number; refund: number } | null): ColDef<T> {
+  return {
+    colId: "anatomy",
+    headerName: "Where it went",
+    width: 160,
+    sortable: false,
+    filter: false,
+    headerTooltip: "Gold reached the maker; blue PayPal, pink platform, violet currency conversion, red refunds.",
+    cellRenderer: (p: CustomCellRendererProps<T>) => {
+      const v = p.data && !p.node.rowPinned ? get(p.data) : null;
+      if (!v) return null;
+      return (
+        <span className="flex h-full items-center">
+          <FeeBar gross={v.gross} parts={v} />
+        </span>
+      );
+    },
+  };
+}
+
+export function threadCol<T extends Row>(field: keyof T & string, href: (id: string) => string): ColDef<T> {
+  return {
+    field: field as ColDef<T>["field"],
+    headerName: "Thread",
+    width: 96,
+    sortable: false,
+    filter: false,
+    cellRenderer: (p: CustomCellRendererProps<T, string | null>) =>
+      p.value ? (
+        <Link href={href(p.value)} className="inline-flex min-h-8 items-center gap-1 text-accent hover:underline" onClick={(e) => e.stopPropagation()}>
+          <IconMessages className="h-4 w-4" />
+          <span>Open</span>
+        </Link>
+      ) : null,
+  };
+}

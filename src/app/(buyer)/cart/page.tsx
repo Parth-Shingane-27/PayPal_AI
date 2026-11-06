@@ -1,6 +1,8 @@
 import { buyerPage } from "@/server/page-auth";
 import { CartView } from "./CartView";
 
+export const metadata = { title: "Cart" };
+
 export default async function CartPage({ searchParams }: { searchParams: Promise<{ cancelled?: string }> }) {
   await buyerPage();
   const { cancelled } = await searchParams;

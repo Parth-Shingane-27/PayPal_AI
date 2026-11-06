@@ -41,7 +41,7 @@ function ListingCard({ l, onChange }: { l: Listing; onChange: () => void }) {
     <div className="rounded-lg border border-slate-200 bg-white p-3 text-sm">
       <div className="flex items-center gap-2">
         <span className="font-mono font-semibold">{l.locale}</span>
-        <span className={`rounded px-1.5 py-0.5 text-xs ${l.status === "PUBLISHED" ? "bg-emerald-100 text-emerald-800" : l.status === "DRAFT" ? "bg-amber-100 text-amber-800" : "bg-slate-200"}`}>{l.status}</span>
+        <span className={`rounded px-1.5 py-0.5 text-xs ${l.status === "PUBLISHED" ? "bg-positive-soft text-positive-ink" : l.status === "DRAFT" ? "bg-amber-100 text-amber-800" : "bg-slate-200"}`}>{l.status}</span>
         {l.status === "PUBLISHED" && !l.embedded && <span className="text-xs text-slate-500">indexing for search…</span>}
         <span className="ml-auto font-semibold">{l.price.display}</span>
       </div>
@@ -91,7 +91,7 @@ function ListingCard({ l, onChange }: { l: Listing; onChange: () => void }) {
           ))}
           <div className="mt-2 flex gap-2">
             {l.status !== "PUBLISHED" && (
-              <button className="rounded bg-emerald-600 px-3 py-1 text-white" onClick={() => act(() => api(`/api/listings/${l.id}/publish`, { method: "POST" }))}>
+              <button className="rounded bg-accent px-3 py-1 text-white" onClick={() => act(() => api(`/api/listings/${l.id}/publish`, { method: "POST" }))}>
                 Publish
               </button>
             )}
@@ -165,7 +165,7 @@ function CreateListings({ productId, existing, onDone }: { productId: string; ex
       {result && (
         <div className="mt-2 space-y-1 text-sm">
           {result.saved.map((s) => (
-            <p key={s.listing_id} className="text-emerald-800">
+            <p key={s.listing_id} className="text-positive-ink">
               ✓ {s.market}: {s.price.display} · profit {s.profit.display} ({s.margin_percent}%) — draft saved below
             </p>
           ))}

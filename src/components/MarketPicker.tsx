@@ -15,9 +15,9 @@ export function MarketPicker({ current }: { current: string }) {
   }, []);
   return (
     <label className="flex items-center gap-2 text-sm">
-      <span className="text-slate-600">Market</span>
+      <span className="sr-only">Shopping in</span>
       <select
-        className="rounded border border-slate-300 px-2 py-1"
+        className="min-h-11 rounded-md border border-rule-strong bg-sheet px-2 py-1 text-ink md:min-h-9"
         value={current}
         onChange={async (e) => {
           await api("/api/me/market", { body: { locale: e.target.value } });
@@ -26,7 +26,7 @@ export function MarketPicker({ current }: { current: string }) {
       >
         {markets.map((m) => (
           <option key={m.locale} value={m.locale}>
-            {m.country} · {m.language} · {m.currency}
+            {m.language} ({m.country}), {m.currency}
           </option>
         ))}
       </select>

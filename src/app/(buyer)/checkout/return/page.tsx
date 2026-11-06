@@ -3,6 +3,8 @@ import { AppError } from "@/server/errors";
 import { buyerPage } from "@/server/page-auth";
 import { captureCheckout } from "@/server/services/checkout";
 
+export const metadata = { title: "Payment" };
+
 /**
  * Redirect checkout: PayPal sends the buyer back here with ?token=<PayPal
  * order id> after approval. Capture is idempotent, so a refresh is harmless.
@@ -24,7 +26,7 @@ export default async function CheckoutReturnPage({ searchParams }: { searchParam
   } catch (err) {
     outcome = { tone: "bad", text: err instanceof AppError ? err.message : "Something went wrong while confirming your payment." };
   }
-  const style = { ok: "bg-emerald-50 text-emerald-800", wait: "bg-amber-50 text-amber-800", bad: "bg-red-50 text-red-800" }[outcome.tone];
+  const style = { ok: "bg-positive-soft text-positive-ink", wait: "bg-amber-50 text-amber-800", bad: "bg-red-50 text-red-800" }[outcome.tone];
   return (
     <div className="space-y-4">
       <h1 className="text-xl font-semibold">Checkout</h1>

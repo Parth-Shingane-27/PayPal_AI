@@ -273,7 +273,7 @@ export function ChatPanel(props: {
                 ))}
                 {t?.checkoutLinks.map((c) =>
                   paid[c.order_id] ? (
-                    <p key={c.paypal_order_id} className="rounded bg-emerald-50 p-2 text-sm text-emerald-800">
+                    <p key={c.paypal_order_id} className="rounded bg-positive-soft p-2 text-sm text-positive-ink">
                       Paid: {paid[c.order_id]!.total.display}. Order status {paid[c.order_id]!.order_status}.
                     </p>
                   ) : (
