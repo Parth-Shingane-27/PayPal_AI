@@ -1,6 +1,7 @@
 "use client";
 
 import { useSyncExternalStore } from "react";
+import { useT } from "../i18n/I18nProvider";
 import { IconMoon, IconSun } from "../icons";
 
 type Theme = "light" | "dark";
@@ -36,16 +37,17 @@ export function useTheme(): Theme {
 
 export function ThemeToggle({ compact = false }: { compact?: boolean }) {
   const theme = useTheme();
+  const t = useT();
   const next: Theme = theme === "dark" ? "light" : "dark";
   return (
     <button
       type="button"
       onClick={() => setTheme(next)}
       className="inline-flex min-h-11 items-center gap-2 rounded-md px-2 text-sm text-ink-2 hover:bg-sheet-2 hover:text-ink"
-      aria-label={`Switch to ${next} theme`}
+      aria-label={next === "dark" ? t("theme.toDark") : t("theme.toLight")}
     >
       {theme === "dark" ? <IconSun /> : <IconMoon />}
-      {!compact && <span>{theme === "dark" ? "Light theme" : "Dark theme"}</span>}
+      {!compact && <span>{next === "dark" ? t("theme.toDark") : t("theme.toLight")}</span>}
     </button>
   );
 }

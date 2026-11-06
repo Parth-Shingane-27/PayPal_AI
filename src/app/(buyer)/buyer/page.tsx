@@ -2,7 +2,10 @@ import Link from "next/link";
 import { PurchasesGrid } from "@/components/buyer/PurchasesGrid";
 import { BuyerSpendChart } from "@/components/agcharts/Charts";
 import { Panel, ProductThumb, SectionHeading } from "@/components/ui";
-import { COUNTRY_LABEL, formatBps, formatDate, formatDay, LANGUAGE_OF } from "@/lib/format";
+import { formatBps, formatDate, formatDay } from "@/lib/format";
+import { localeOf } from "@/lib/i18n/core";
+import type { MessageKey } from "@/lib/i18n/messages";
+import { getT, getUiLang } from "@/lib/i18n/server";
 import { buyerPage } from "@/server/page-auth";
 import { buyerOverview } from "@/server/services/analytics";
 import { listConversations } from "@/server/services/messages";
@@ -10,7 +13,7 @@ import { listConversations } from "@/server/services/messages";
 export const metadata = { title: "Journal" };
 
 /** A postage stamp for one maker's country: perforated edge, country code, count. */
-function PassportStamp({ country, makers, orders, rotate }: { country: string; makers: string[]; orders: number; rotate: number }) {
+function PassportStamp({ country, makers, orders, rotate, t }: { country: string; makers: string[]; orders: number; rotate: number; t: Awaited<ReturnType<typeof getT>> }) {
   return (
     <li
       className="relative flex aspect-[4/5] w-28 flex-col justify-between bg-sheet p-2.5 text-ink outline outline-[1.5px] outline-offset-[-6px] outline-dashed outline-rule-strong transition-transform duration-200 [transform:rotate(var(--tilt))] hover:[transform:rotate(0deg)_translateY(-4px)] hover:shadow-[var(--shadow-overlay)]"
@@ -20,8 +23,8 @@ function PassportStamp({ country, makers, orders, rotate }: { country: string; m
       <span className="perforated absolute inset-x-0 -bottom-[3px] h-[7px]" aria-hidden />
       <span className="font-display text-[2.1rem] leading-none font-bold tracking-tight text-accent [font-stretch:80%]">{country}</span>
       <span className="text-[0.72rem] leading-tight text-ink-2">
-        <span className="block font-semibold text-ink">{COUNTRY_LABEL[country] ?? country}</span>
-        {orders} {orders === 1 ? "order" : "orders"}, {makers.length} {makers.length === 1 ? "maker" : "makers"}
+        <span className="block font-semibold text-ink">{t(`country.${country}` as MessageKey)}</span>
+        {orders === 1 ? t("stamp.order") : t("stamp.orders", { n: orders })}, {makers.length === 1 ? t("stamp.maker") : t("stamp.makers", { n: makers.length })}
       </span>
     </li>
   );
@@ -29,6 +32,8 @@ function PassportStamp({ country, makers, orders, rotate }: { country: string; m
 
 export default async function BuyerJournal() {
   const buyer = await buyerPage();
+  const t = await getT();
+  const uiLocale = localeOf(await getUiLang());
   const [o, threads] = await Promise.all([buyerOverview(buyer.buyerId, buyer.market), listConversations(buyer)]);
   const k = o.kpis;
   const byCountry = new Map<string, { makers: string[]; orders: number }>();
@@ -46,12 +51,12 @@ export default async function BuyerJournal() {
       <header className="flex flex-wrap items-end justify-between gap-4">
         <div>
           <p className="text-ink-3">
-            Shopping in {LANGUAGE_OF[buyer.market] ?? buyer.market}, paying in {o.reference_currency}
+            {t("journal.shopping", { lang: t(`langname.${buyer.market.slice(0, 2)}` as MessageKey), currency: o.reference_currency })}
           </p>
-          <h1 className="font-display text-[2rem] leading-tight font-bold tracking-[-0.025em] md:text-[2.4rem]">{buyer.name.split(" ")[0]}&apos;s purchase journal</h1>
+          <h1 className="font-display text-[2rem] leading-tight font-bold tracking-[-0.025em] md:text-[2.4rem]">{t("journal.title", { name: buyer.name.split(" ")[0] ?? buyer.name })}</h1>
         </div>
         <Link href="/shop" className="inline-flex min-h-11 items-center rounded-md bg-accent px-5 font-semibold text-sheet">
-          Browse the shop
+          {t("journal.browse")}
         </Link>
       </header>
 
@@ -59,29 +64,28 @@ export default async function BuyerJournal() {
         <div className="grid gap-6 p-5 md:grid-cols-[17rem_minmax(0,1fr)] md:p-6">
           <div>
             <h2 id="passport-title" className="font-display text-xl font-semibold text-accent-ink">
-              Your passport
+              {t("passport.title")}
             </h2>
             <p className="mt-1 text-sm text-accent-ink">
-              {k.makers} makers in {k.countries} countries. Of the {k.spent.display} you spent, <span className="num font-semibold">{k.reached_makers.display}</span> ({formatBps(k.reached_bps, 0)}) reached
-              the makers after fees.
+              {t("passport.body", { makers: k.makers, countries: k.countries, spent: k.spent.display, reached: k.reached_makers.display, pct: formatBps(k.reached_bps, 0) })}
             </p>
             <dl className="mt-4 grid grid-cols-2 gap-3 text-sm">
               <div>
-                <dt className="text-accent-ink/80">Orders</dt>
+                <dt className="text-accent-ink/80">{t("passport.orders")}</dt>
                 <dd className="num font-display text-2xl font-semibold text-accent-ink">{k.orders}</dd>
               </div>
               <div>
-                <dt className="text-accent-ink/80">Refunds</dt>
+                <dt className="text-accent-ink/80">{t("passport.refunds")}</dt>
                 <dd className="num font-display text-2xl font-semibold text-accent-ink">{k.refunds}</dd>
               </div>
             </dl>
           </div>
           {stamps.length === 0 ? (
-            <p className="self-center text-accent-ink">No stamps yet. Your first order from another country adds one.</p>
+            <p className="self-center text-accent-ink">{t("passport.empty")}</p>
           ) : (
-            <ul className="flex flex-wrap content-start gap-4 py-2" aria-label="Countries you have bought from">
+            <ul className="flex flex-wrap content-start gap-4 py-2" aria-label={t("passport.list")}>
               {stamps.map(([country, v], i) => (
-                <PassportStamp key={country} country={country} makers={v.makers} orders={v.orders} rotate={[-3, 2, -1.5, 3, -2, 1][i % 6]!} />
+                <PassportStamp key={country} country={country} makers={v.makers} orders={v.orders} rotate={[-3, 2, -1.5, 3, -2, 1][i % 6]!} t={t} />
               ))}
             </ul>
           )}
@@ -90,30 +94,30 @@ export default async function BuyerJournal() {
 
       <div className="grid gap-6 lg:grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)]">
         <Panel labelledBy="spend-title">
-          <SectionHeading id="spend-title" title="Spending by month" aside={`In ${o.reference_currency}, by the currency you paid in`} />
-          <BuyerSpendChart months={o.monthly} currency={o.reference_currency} locale={buyer.market} title="Spending by month" />
+          <SectionHeading id="spend-title" title={t("spend.title")} aside={t("spend.aside", { currency: o.reference_currency })} />
+          <BuyerSpendChart months={o.monthly} currency={o.reference_currency} locale={buyer.market} title={t("spend.title")} />
         </Panel>
         <Panel labelledBy="threads-title">
-          <SectionHeading id="threads-title" title="Conversations" aside={<Link href="/buyer/messages" className="text-accent hover:underline">All messages</Link>} />
+          <SectionHeading id="threads-title" title={t("conv.title")} aside={<Link href="/buyer/messages" className="text-accent hover:underline">{t("conv.all")}</Link>} />
           {openThreads.length === 0 ? (
-            <p className="text-sm text-ink-3">No open conversations. Use Ask the maker on any product.</p>
+            <p className="text-sm text-ink-3">{t("conv.none")}</p>
           ) : (
             <ul className="divide-y divide-rule">
-              {openThreads.map((t) => (
-                <li key={t.id}>
-                  <Link href={`/buyer/messages?c=${t.id}`} className="flex gap-3 py-2.5 hover:bg-sheet-2">
-                    <ProductThumb src={t.product?.image_url} alt="" size={36} />
+              {openThreads.map((th) => (
+                <li key={th.id}>
+                  <Link href={`/buyer/messages?c=${th.id}`} className="flex gap-3 py-2.5 hover:bg-sheet-2">
+                    <ProductThumb src={th.product?.image_url} alt="" size={36} />
                     <span className="min-w-0 flex-1">
                       <span className="flex items-baseline justify-between gap-2">
-                        <span className={`truncate ${t.unread ? "font-semibold" : "text-ink-2"}`}>
-                          {t.counterpart.name}
-                          {t.unread > 0 && <span className="sr-only">, new reply</span>}
+                        <span className={`truncate ${th.unread ? "font-semibold" : "text-ink-2"}`}>
+                          {th.counterpart.name}
+                          {th.unread > 0 && <span className="sr-only">, {t("conv.newReply")}</span>}
                         </span>
-                        <span className="shrink-0 text-xs text-ink-3">{formatDay(t.last_message_at)}</span>
+                        <span className="shrink-0 text-xs text-ink-3">{formatDay(th.last_message_at, uiLocale)}</span>
                       </span>
-                      <span className="block truncate text-sm text-ink-3">{t.last_message?.preview}</span>
+                      <span className="block truncate text-sm text-ink-3">{th.last_message?.preview}</span>
                     </span>
-                    {t.unread > 0 && <span className="mt-2 h-2 w-2 shrink-0 rounded-full bg-alert" aria-hidden />}
+                    {th.unread > 0 && <span className="mt-2 h-2 w-2 shrink-0 rounded-full bg-alert" aria-hidden />}
                   </Link>
                 </li>
               ))}
@@ -123,34 +127,34 @@ export default async function BuyerJournal() {
       </div>
 
       <section aria-labelledby="purchases-title">
-        <SectionHeading id="purchases-title" title="Purchases" aside={<Link href="/orders" className="text-accent hover:underline">Full order history</Link>} />
+        <SectionHeading id="purchases-title" title={t("purch.title")} aside={<Link href="/orders" className="text-accent hover:underline">{t("purch.history")}</Link>} />
         <PurchasesGrid pageSize={10} />
       </section>
 
       <div className="grid gap-6 lg:grid-cols-2">
         <Panel labelledBy="makers-title">
-          <SectionHeading id="makers-title" title="Makers you buy from" />
+          <SectionHeading id="makers-title" title={t("makers.title")} />
           <ul className="divide-y divide-rule">
             {o.makers.slice(0, 6).map((m) => (
               <li key={m.seller_id} className="flex items-center justify-between gap-3 py-2.5 text-sm">
                 <span className="min-w-0">
                   <span className="block truncate font-medium">{m.seller}</span>
                   <span className="text-ink-3">
-                    {COUNTRY_LABEL[m.country] ?? m.country}, last order {formatDate(m.last_order)}
+                    {t("makers.last", { country: t(`country.${m.country}` as MessageKey), date: formatDate(m.last_order, uiLocale) })}
                   </span>
                 </span>
                 <span className="num shrink-0 text-right">
                   <span className="block font-semibold">{m.spent.display}</span>
-                  <span className="text-ink-3">{m.orders} orders</span>
+                  <span className="text-ink-3">{m.orders === 1 ? t("stamp.order") : t("stamp.orders", { n: m.orders })}</span>
                 </span>
               </li>
             ))}
           </ul>
         </Panel>
         <Panel labelledBy="popular-title">
-          <SectionHeading id="popular-title" title="Popular in your market" aside="You haven't bought these yet" />
+          <SectionHeading id="popular-title" title={t("popular.title")} aside={t("popular.aside")} />
           {o.recommendations.length === 0 ? (
-            <p className="text-sm text-ink-3">Nothing new to suggest right now.</p>
+            <p className="text-sm text-ink-3">{t("popular.none")}</p>
           ) : (
             <ul className="grid grid-cols-2 gap-3">
               {o.recommendations.map((r) => (
@@ -164,11 +168,11 @@ export default async function BuyerJournal() {
             </ul>
           )}
           <Link href="/shop" className="mt-4 inline-flex min-h-10 items-center text-sm font-medium text-accent hover:underline">
-            See them in the shop
+            {t("popular.see")}
           </Link>
         </Panel>
       </div>
-      <p className="text-xs text-ink-3">{o.reference_rates_note}</p>
+      <p className="text-xs text-ink-3">{t("journal.footnote", { currency: o.reference_currency })}</p>
     </div>
   );
 }

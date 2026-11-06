@@ -14,7 +14,18 @@ import {
 import { AgGridReact } from "ag-grid-react";
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { clearGridState, loadGridState, saveGridState } from "@/lib/grid-state";
+import { useI18n, useT } from "../i18n/I18nProvider";
 import { IconColumns, IconDownload, IconSearch } from "../icons";
+
+/** AG Grid's own pagination and filter words, per interface language. */
+const AG_LOCALE: Record<string, Record<string, string>> = {
+  hi: { page: "पेज", of: "में से", to: "से", pageSizeSelectorLabel: "पेज आकार:", noRowsToShow: "कोई पंक्ति नहीं", loadingOoo: "लोड हो रहा है…", filterOoo: "छाँटें…", contains: "शामिल", equals: "बराबर", applyFilter: "लागू करें", resetFilter: "रीसेट" },
+  ja: { page: "ページ", of: "/", to: "〜", pageSizeSelectorLabel: "表示件数:", noRowsToShow: "表示する行がありません", loadingOoo: "読み込み中…", filterOoo: "絞り込み…", contains: "含む", equals: "等しい", applyFilter: "適用", resetFilter: "リセット" },
+  de: { page: "Seite", of: "von", to: "bis", pageSizeSelectorLabel: "Zeilen pro Seite:", noRowsToShow: "Keine Zeilen", loadingOoo: "Wird geladen…", filterOoo: "Filtern…", contains: "Enthält", equals: "Gleich", applyFilter: "Anwenden", resetFilter: "Zurücksetzen" },
+  fr: { page: "Page", of: "sur", to: "à", pageSizeSelectorLabel: "Lignes par page :", noRowsToShow: "Aucune ligne", loadingOoo: "Chargement…", filterOoo: "Filtrer…", contains: "Contient", equals: "Égal à", applyFilter: "Appliquer", resetFilter: "Réinitialiser" },
+  es: { page: "Página", of: "de", to: "a", pageSizeSelectorLabel: "Filas por página:", noRowsToShow: "Sin filas", loadingOoo: "Cargando…", filterOoo: "Filtrar…", contains: "Contiene", equals: "Igual a", applyFilter: "Aplicar", resetFilter: "Restablecer" },
+  it: { page: "Pagina", of: "di", to: "a", pageSizeSelectorLabel: "Righe per pagina:", noRowsToShow: "Nessuna riga", loadingOoo: "Caricamento…", filterOoo: "Filtra…", contains: "Contiene", equals: "Uguale a", applyFilter: "Applica", resetFilter: "Reimposta" },
+};
 
 ModuleRegistry.registerModules([AllCommunityModule]);
 
@@ -77,6 +88,7 @@ export type DataGridProps<T> = {
 };
 
 function ColumnChooser<T>({ api }: { api: GridApi<T> | null }) {
+  const t = useT();
   const [open, setOpen] = useState(false);
   const [, force] = useState(0);
   const ref = useRef<HTMLDivElement>(null);
@@ -97,7 +109,7 @@ function ColumnChooser<T>({ api }: { api: GridApi<T> | null }) {
     <div className="relative" ref={ref}>
       <button type="button" className={toolButton} aria-expanded={open} onClick={() => setOpen((o) => !o)} disabled={!api}>
         <IconColumns />
-        <span>Columns</span>
+        <span>{t("grid.columns")}</span>
       </button>
       {open && (
         <div className="absolute right-0 z-20 mt-1 max-h-80 w-60 overflow-y-auto rounded-[10px] border border-rule bg-sheet p-2 shadow-[var(--shadow-overlay)]">
@@ -126,6 +138,7 @@ const toolButton =
   "inline-flex min-h-10 items-center gap-1.5 rounded-md border border-rule bg-sheet px-3 text-sm font-medium text-ink-2 hover:border-rule-strong hover:text-ink disabled:opacity-50";
 
 export default function DataGrid<T>(props: DataGridProps<T>) {
+  const { t, lang } = useI18n();
   const { storageKey, rowData, columnDefs, totals, exportName } = props;
   const [api, setApi] = useState<GridApi<T> | null>(null);
   const [query, setQuery] = useState("");
@@ -178,7 +191,7 @@ export default function DataGrid<T>(props: DataGridProps<T>) {
     <section aria-label={props.label} className="flex flex-col gap-3">
       <div className="flex flex-wrap items-center gap-2">
         <label htmlFor={searchId} className="relative min-w-0 flex-1 basis-56">
-          <span className="sr-only">Filter rows</span>
+          <span className="sr-only">{t("grid.filterRows")}</span>
           <span className="pointer-events-none absolute inset-y-0 left-3 flex items-center text-ink-3">
             <IconSearch className="h-4 w-4" />
           </span>
@@ -187,7 +200,7 @@ export default function DataGrid<T>(props: DataGridProps<T>) {
             type="search"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder={`Filter by ${props.searchHint}`}
+            placeholder={t("grid.filterBy", { hint: props.searchHint })}
             className="min-h-10 w-full rounded-md border border-rule bg-sheet pr-3 pl-9 text-sm text-ink placeholder:text-ink-3 focus:border-accent"
           />
         </label>
@@ -214,7 +227,7 @@ export default function DataGrid<T>(props: DataGridProps<T>) {
           }
         >
           <IconDownload />
-          <span>Export CSV</span>
+          <span>{t("grid.export")}</span>
         </button>
         <button
           type="button"
@@ -226,12 +239,14 @@ export default function DataGrid<T>(props: DataGridProps<T>) {
             setQuery("");
           }}
         >
-          Reset layout
+          {t("grid.reset")}
         </button>
       </div>
 
       <div className="min-w-0">
         <AgGridReact<T>
+          key={lang}
+          localeText={AG_LOCALE[lang]}
           theme={gridTheme}
           rowData={rowData ?? undefined}
           loading={rowData === null}
@@ -268,7 +283,7 @@ export default function DataGrid<T>(props: DataGridProps<T>) {
       </div>
       {shown !== null && rowData && (
         <p className="text-xs text-ink-3" aria-live="polite">
-          {shown === rowData.length ? `${rowData.length} rows` : `${shown} of ${rowData.length} rows match`}
+          {shown === rowData.length ? t("grid.rows", { n: rowData.length }) : t("grid.rowsMatch", { shown, total: rowData.length })}
         </p>
       )}
     </section>

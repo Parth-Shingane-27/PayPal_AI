@@ -1,5 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import { Bricolage_Grotesque, Hanken_Grotesk } from "next/font/google";
+import { I18nProvider } from "@/components/i18n/I18nProvider";
+import { getUiLang } from "@/lib/i18n/server";
 import "./globals.css";
 
 const bricolage = Bricolage_Grotesque({ subsets: ["latin"], variable: "--font-bricolage", display: "swap" });
@@ -37,13 +39,16 @@ export const viewport: Viewport = {
 /** Applies the saved theme before first paint so there is no flash. */
 const THEME_SCRIPT = `try{if(localStorage.getItem("gc-theme-v2")==="dark")document.documentElement.dataset.theme="dark"}catch(e){}`;
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
+export default async function RootLayout({ children }: { children: React.ReactNode }) {
+  const lang = await getUiLang();
   return (
-    <html lang="en" className={`${bricolage.variable} ${hanken.variable}`} suppressHydrationWarning>
+    <html lang={lang} className={`${bricolage.variable} ${hanken.variable}`} suppressHydrationWarning>
       <head>
         <script dangerouslySetInnerHTML={{ __html: THEME_SCRIPT }} />
       </head>
-      <body>{children}</body>
+      <body>
+        <I18nProvider lang={lang}>{children}</I18nProvider>
+      </body>
     </html>
   );
 }

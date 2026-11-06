@@ -1,8 +1,11 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { LanguagePicker } from "@/components/i18n/I18nProvider";
 import { SaleWaybill } from "@/components/landing/SaleWaybill";
 import { CountryStamp } from "@/components/ui";
-import { COUNTRY_LABEL, formatCount, LANGUAGE_OF } from "@/lib/format";
+import { formatCount } from "@/lib/format";
+import type { MessageKey } from "@/lib/i18n/messages";
+import { getT } from "@/lib/i18n/server";
 import { listMarkets } from "@/server/domain/markets";
 import { marketplaceStats } from "@/server/services/analytics";
 
@@ -18,34 +21,24 @@ export const metadata: Metadata = {
   openGraph: { title: "GlobalCart: sell your craft in ten countries from one listing", description: DESCRIPTION, url: "/" },
 };
 
-const STEPS = [
-  { title: "List it once", body: "Write the product in your own language, with your cost, shipping and the margin you want." },
-  { title: "AI localizes and prices it", body: "The Listing assistant translates it for each market and suggests a local price from real fees and exchange rates. You approve each draft." },
-  { title: "Buyers pay in their currency", body: "Shoppers browse in their language and check out with PayPal. The shopping assistant can fill the cart for them; the buyer always approves the payment." },
-  { title: "You approve the money", body: "Refunds and payouts are proposals until you click approve. Every PayPal call and agent step is logged for you to check." },
-];
-
-const FAQ = [
-  {
-    q: "Which countries can I sell to?",
-    a: "Eleven markets: the United States, United Kingdom, Canada, Australia, Germany, France, Spain, Italy, Mexico, Japan and India, each in its own language and currency.",
-  },
-  {
-    q: "What does a sale cost me?",
-    a: "PayPal's fee, a 5% GlobalCart fee, and a currency conversion cost when the buyer pays in a currency other than yours. Every order shows the exact split, and the dashboard shows what you kept.",
-  },
-  {
-    q: "Can the AI move my money?",
-    a: "No. Assistants can only propose refunds and payouts. Nothing is refunded or paid out until you approve it, and the buyer approves every payment in PayPal.",
-  },
-  {
-    q: "Do I need to speak my buyers' languages?",
-    a: "No. Listings are translated for each market, and messages from buyers arrive with a translation into your language.",
-  },
-];
+const STEP_KEYS = [
+  ["land.s1t", "land.s1b"],
+  ["land.s2t", "land.s2b"],
+  ["land.s3t", "land.s3b"],
+  ["land.s4t", "land.s4b"],
+] as const;
+const FAQ_KEYS = [
+  ["land.q1", "land.a1"],
+  ["land.q2", "land.a2"],
+  ["land.q3", "land.a3"],
+  ["land.q4", "land.a4"],
+] as const;
 
 export default async function Home() {
   const s = await marketplaceStats();
+  const t = await getT();
+  const STEPS = STEP_KEYS.map(([a, b]) => ({ title: t(a), body: t(b) }));
+  const FAQ = FAQ_KEYS.map(([a, b]) => ({ q: t(a), a: t(b) }));
   const markets = listMarkets();
   const base = process.env.APP_URL ?? "http://localhost:3000";
 
@@ -98,16 +91,17 @@ export default async function Home() {
             <span className="font-display text-xl font-bold tracking-[-0.02em]">GlobalCart</span>
           </Link>
           <a href="#how" className={`${navLink} hidden sm:inline-flex`}>
-            How it works
+            {t("land.how")}
           </a>
           <a href="#makers" className={`${navLink} hidden sm:inline-flex`}>
-            Makers
+            {t("land.makers")}
           </a>
           <a href="#faq" className={`${navLink} hidden md:inline-flex`}>
-            Questions
+            {t("land.questions")}
           </a>
+          <LanguagePicker compact />
           <Link href="/login" className="inline-flex min-h-11 items-center rounded-md bg-ink px-4 text-sm font-semibold text-sheet hover:bg-accent">
-            Try the demo
+            {t("land.try")}
           </Link>
         </nav>
       </header>
@@ -117,18 +111,18 @@ export default async function Home() {
           <div>
             <p className="mb-4 inline-flex items-center gap-2 text-sm font-medium text-accent">
               <span className="h-2 w-2 rounded-full bg-accent" aria-hidden />
-              {s.makers} makers selling into {s.markets} markets
+              {t("land.badge", { makers: s.makers, markets: s.markets })}
             </p>
             <h1 id="hero-title" className="font-display text-[2.6rem] leading-[1.02] font-bold tracking-[-0.035em] text-ink sm:text-[3.4rem] lg:text-[4.1rem]">
-              Sell your craft in ten countries from one listing.
+              {t("land.h1")}
             </h1>
-            <p className="mt-5 max-w-xl text-lg leading-relaxed text-ink-2">{DESCRIPTION}</p>
+            <p className="mt-5 max-w-xl text-lg leading-relaxed text-ink-2">{t("land.lede")}</p>
             <div className="mt-8 flex flex-wrap gap-3">
               <Link href="/login" className="inline-flex min-h-12 items-center rounded-md bg-accent px-6 font-semibold text-sheet hover:opacity-90">
-                Try the demo
+                {t("land.try")}
               </Link>
               <a href="#how" className="inline-flex min-h-12 items-center rounded-md border border-rule-strong px-6 font-semibold text-ink hover:border-ink">
-                See how it works
+                {t("land.seeHow")}
               </a>
             </div>
           </div>
@@ -138,7 +132,7 @@ export default async function Home() {
         <section id="how" aria-labelledby="how-title" className="border-y border-rule bg-sheet">
           <div className="mx-auto max-w-6xl px-4 py-16 md:px-6">
             <h2 id="how-title" className="max-w-2xl font-display text-3xl font-bold tracking-[-0.025em] md:text-4xl">
-              From your workshop to a buyer in Tokyo, in four steps
+              {t("land.howTitle")}
             </h2>
             <ol className="mt-10 grid gap-8 md:grid-cols-2 lg:grid-cols-4">
               {STEPS.map((step, i) => (
@@ -157,9 +151,9 @@ export default async function Home() {
         <section aria-labelledby="markets-title" className="mx-auto max-w-6xl px-4 py-16 md:px-6">
           <div className="flex flex-wrap items-end justify-between gap-4">
             <h2 id="markets-title" className="max-w-xl font-display text-3xl font-bold tracking-[-0.025em] md:text-4xl">
-              Eleven markets, each in its own language and currency
+              {t("land.marketsTitle")}
             </h2>
-            <p className="max-w-sm text-ink-3">India pays in US dollars because PayPal accepts rupees only from accounts registered in India.</p>
+            <p className="max-w-sm text-ink-3">{t("land.marketsNote")}</p>
           </div>
           <ul className="mt-10 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
             {markets.map((m) => (
@@ -169,9 +163,9 @@ export default async function Home() {
               >
                 <CountryStamp country={m.country} />
                 <span>
-                  <span className="block font-semibold">{COUNTRY_LABEL[m.country] ?? m.country}</span>
+                  <span className="block font-semibold">{t(`country.${m.country}` as MessageKey)}</span>
                   <span className="text-sm text-ink-3">
-                    {LANGUAGE_OF[m.locale] ?? m.language}, {m.currency}
+                    {t(`langname.${m.locale.slice(0, 2)}` as MessageKey)}, {m.currency}
                   </span>
                 </span>
               </li>
@@ -182,7 +176,7 @@ export default async function Home() {
         <section id="makers" aria-labelledby="makers-title" className="border-y border-rule bg-sheet">
           <div className="mx-auto max-w-6xl px-4 py-16 md:px-6">
             <h2 id="makers-title" className="font-display text-3xl font-bold tracking-[-0.025em] md:text-4xl">
-              Made by {s.makers} makers in {new Set(s.featured.map((f) => f.country)).size} countries
+              {t("land.makersTitle", { n: s.makers, c: new Set(s.featured.map((f) => f.country)).size })}
             </h2>
             <ul className="mt-10 grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-5">
               {s.featured.map((f) => (
@@ -209,14 +203,14 @@ export default async function Home() {
 
         <section aria-labelledby="numbers-title" className="mx-auto max-w-6xl px-4 py-16 md:px-6">
           <h2 id="numbers-title" className="font-display text-3xl font-bold tracking-[-0.025em] md:text-4xl">
-            The demo marketplace, last 90 days
+            {t("land.numbersTitle")}
           </h2>
           <dl className="mt-8 grid gap-px overflow-hidden rounded-[10px] border border-rule bg-rule sm:grid-cols-2 lg:grid-cols-4">
             {[
-              ["Orders paid through PayPal", formatCount(s.orders_90d)],
-              ["Sales, in US dollars", s.sales_90d.display],
-              ["Of each sale reached the maker", `${(s.anatomy_bps.net / 100).toFixed(1)}%`],
-              ["Buyers in", `${s.markets} markets`],
+              [t("land.n1"), formatCount(s.orders_90d)],
+              [t("land.n2"), s.sales_90d.display],
+              [t("land.n3"), `${(s.anatomy_bps.net / 100).toFixed(1)}%`],
+              [t("land.n4"), t("land.n4v", { n: s.markets })],
             ].map(([label, value]) => (
               <div key={label} className="bg-sheet p-5">
                 <dt className="text-sm text-ink-3">{label}</dt>
@@ -224,13 +218,13 @@ export default async function Home() {
               </div>
             ))}
           </dl>
-          <p className="mt-3 text-sm text-ink-3">Figures come from the seeded demo data and use fixed reference exchange rates.</p>
+          <p className="mt-3 text-sm text-ink-3">{t("land.numbersNote")}</p>
         </section>
 
         <section id="faq" aria-labelledby="faq-title" className="border-t border-rule bg-sheet">
           <div className="mx-auto grid max-w-6xl gap-10 px-4 py-16 md:px-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.6fr)]">
             <h2 id="faq-title" className="font-display text-3xl font-bold tracking-[-0.025em] md:text-4xl">
-              Questions makers ask
+              {t("land.faqTitle")}
             </h2>
             <div className="divide-y divide-rule border-y border-rule">
               {FAQ.map((f) => (
@@ -252,12 +246,12 @@ export default async function Home() {
           <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-6 px-4 py-14 md:px-6">
             <div>
               <h2 id="cta-title" className="font-display text-3xl font-bold tracking-[-0.025em]">
-                See it from both sides
+                {t("land.ctaTitle")}
               </h2>
-              <p className="mt-2 max-w-xl text-sheet/80">Sign in as a maker to see the dashboard and sales ledger, or as a buyer to shop in Hindi, Japanese or German.</p>
+              <p className="mt-2 max-w-xl text-sheet/80">{t("land.ctaBody")}</p>
             </div>
             <Link href="/login" className="inline-flex min-h-12 items-center rounded-md bg-accent px-6 font-semibold text-sheet hover:opacity-90">
-              Try the demo
+              {t("land.try")}
             </Link>
           </div>
         </section>
@@ -265,13 +259,13 @@ export default async function Home() {
 
       <footer className="border-t border-rule">
         <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-4 px-4 py-8 text-sm text-ink-3 md:px-6">
-          <p>GlobalCart, a demo marketplace. Payments run on the PayPal sandbox; no real money moves.</p>
+          <p>{t("land.footer")}</p>
           <nav aria-label="Footer" className="flex gap-4">
             <a href="#how" className="hover:text-ink">
-              How it works
+              {t("land.how")}
             </a>
             <Link href="/login" className="hover:text-ink">
-              Try the demo
+              {t("land.try")}
             </Link>
           </nav>
         </div>

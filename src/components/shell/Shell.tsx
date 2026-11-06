@@ -21,6 +21,7 @@ import {
   IconSpark,
   IconTruck,
 } from "../icons";
+import { LanguagePicker, useT } from "../i18n/I18nProvider";
 import { LogoutButton } from "../LogoutButton";
 import { ThemeToggle } from "./ThemeToggle";
 
@@ -71,11 +72,12 @@ function useUnread(initial: number) {
 }
 
 function Badge({ n }: { n: number }) {
+  const t = useT();
   if (n <= 0) return null;
   return (
     <span className="ml-auto inline-flex min-w-6 items-center justify-center rounded-full bg-alert px-1.5 text-xs font-semibold leading-5 text-sheet">
       {n}
-      <span className="sr-only"> unread</span>
+      <span className="sr-only"> {t("shell.unread")}</span>
     </span>
   );
 }
@@ -154,6 +156,7 @@ export function Shell({
   children: React.ReactNode;
 }) {
   const unread = useUnread(initialUnread);
+  const t = useT();
   const [open, setOpen] = useState(false);
   useEffect(() => {
     if (!open) return;
@@ -165,7 +168,8 @@ export function Shell({
   const mobileBar = (
     <header className="sticky top-0 z-30 flex items-center gap-2 border-b border-rule bg-sheet/95 px-4 py-2 backdrop-blur md:hidden">
       <Brand href="/login" />
-      <span className="ml-auto">
+      <span className="ml-auto flex items-center gap-1">
+        <LanguagePicker compact />
         <ThemeToggle compact />
       </span>
       <button
@@ -176,7 +180,7 @@ export function Shell({
         onClick={() => setOpen(true)}
       >
         <IconMenu />
-        <span className="sr-only">Open menu</span>
+        <span className="sr-only">{t("shell.openMenu")}</span>
         {unread > 0 && <span className="h-2 w-2 rounded-full bg-alert" aria-hidden />}
       </button>
     </header>
@@ -184,13 +188,13 @@ export function Shell({
 
   const drawer = open && (
     <div className="fixed inset-0 z-40 md:hidden" role="dialog" aria-modal="true" aria-label="Menu" id="nav-drawer">
-      <button type="button" className="absolute inset-0 bg-ink/40" aria-label="Close menu" onClick={() => setOpen(false)} />
+      <button type="button" className="absolute inset-0 bg-ink/40" aria-label={t("shell.closeMenu")} onClick={() => setOpen(false)} />
       <nav className="absolute inset-y-0 right-0 flex w-[min(20rem,86vw)] flex-col gap-4 overflow-y-auto bg-sheet p-4 shadow-[var(--shadow-overlay)]">
         <div className="flex items-center justify-between">
           <Who name={who} sub={sub} />
           <button type="button" className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-md" onClick={() => setOpen(false)} autoFocus>
             <IconClose />
-            <span className="sr-only">Close menu</span>
+            <span className="sr-only">{t("shell.closeMenu")}</span>
           </button>
         </div>
         {tools}
@@ -208,9 +212,12 @@ export function Shell({
         {mobileBar}
         {drawer}
         <aside className="sticky top-0 hidden h-dvh flex-col gap-6 border-r border-rule bg-sheet px-3 py-5 md:flex">
-          <div className="flex items-center justify-between gap-2 pl-2">
-            <Brand href="/login" />
-            <ThemeToggle compact />
+          <div className="flex flex-col gap-3 pl-2">
+            <div className="flex items-center justify-between gap-2">
+              <Brand href="/login" />
+              <ThemeToggle compact />
+            </div>
+            <LanguagePicker compact />
           </div>
           <nav aria-label="Seller" className="flex-1 overflow-y-auto">
             <LinkList links={links} unread={unread} />
@@ -242,6 +249,7 @@ export function Shell({
             <span className="hidden xl:block">
               <Who name={who} sub={sub} />
             </span>
+            <LanguagePicker compact />
             <ThemeToggle compact />
             <LogoutButton />
           </div>

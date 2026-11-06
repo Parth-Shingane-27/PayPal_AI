@@ -9,9 +9,10 @@ import { ChatPanel } from "@/components/ChatPanel";
 import { Grid } from "@/components/grid/Grid";
 import { countryCol, dateCol, marketCol, moneyCol, productCol, statusCol, threadCol } from "@/components/grid/columns";
 import { IconCheck, IconMessages, IconPulse } from "@/components/icons";
-import { DASHBOARD_PERIODS, type DashboardPeriod } from "@/components/PeriodPicker";
+import { useI18n } from "@/components/i18n/I18nProvider";
+import { DASHBOARD_PERIODS, type DashboardPeriod } from "@/lib/periods";
+import type { MessageKey } from "@/lib/i18n/messages";
 import { StatusStamp } from "@/components/ui";
-import { ORDER_STATUS_LABEL } from "@/lib/format";
 import { type DrawerOrder, OrderDrawer } from "../ledger/OrderDrawer";
 
 type Row = DrawerOrder & {
@@ -30,7 +31,6 @@ type Summary = {
 };
 
 const STATUSES = ["PAID", "PARTIALLY_REFUNDED", "REFUNDED", "PENDING_PAYMENT"] as const;
-const SEVERITY_LABEL = { high: "Act now", medium: "Worth a look", low: "For information" } as const;
 
 function AttentionItem({ tone, icon, title, body, action }: { tone: "alert" | "gold" | "ink"; icon: React.ReactNode; title: string; body?: string; action?: React.ReactNode }) {
   const toneCls = tone === "alert" ? "bg-alert-soft text-alert-ink" : tone === "gold" ? "bg-gold-soft text-gold-ink" : "bg-sheet-2 text-ink-2";
@@ -49,6 +49,7 @@ function AttentionItem({ tone, icon, title, body, action }: { tone: "alert" | "g
 const actionLink = "inline-flex min-h-10 items-center rounded-md border border-rule-strong px-3 text-sm font-medium text-ink hover:border-accent hover:text-accent";
 
 export function OperationsView({ period }: { period: DashboardPeriod }) {
+  const { t, locale } = useI18n();
   const [rows, setRows] = useState<{ key: string; data: Row[] } | null>(null);
   const [summary, setSummary] = useState<{ key: string; data: Summary } | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -59,9 +60,10 @@ export function OperationsView({ period }: { period: DashboardPeriod }) {
 
   useEffect(() => {
     const k = `${period}|${tick}`;
-    const fail = (e: unknown) => setError(e instanceof Error ? e.message : "Operations could not be loaded.");
+    const fail = (e: unknown) => setError(e instanceof Error ? e.message : t("ops.error"));
     api<{ rows: Row[] }>(`/api/analytics/seller/sales?period=${period}`).then((r) => setRows({ key: k, data: r.rows }), fail);
     api<Summary>(`/api/operations/summary?period=${period}`).then((r) => setSummary({ key: k, data: r }), fail);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [period, tick]);
 
   // Keep showing the previous rows while a refresh loads, so the grid does not flash.
@@ -75,17 +77,17 @@ export function OperationsView({ period }: { period: DashboardPeriod }) {
 
   const cols = useMemo<ColDef<Row>[]>(
     () => [
-      productCol<Row>("items", "image_url", (r) => `${r.units} ${r.units === 1 ? "item" : "items"}, order ${r.order_id.slice(0, 8)}`, { headerName: "Order" }),
-      dateCol<Row>("date", "Date", { sort: "desc" }),
-      statusCol<Row>("status"),
-      { field: "buyer", headerName: "Buyer", width: 160 },
-      countryCol<Row>("buyer_country", "Ships to"),
-      marketCol<Row>("market"),
-      moneyCol<Row>("gross", "Paid by buyer"),
-      moneyCol<Row>("refunded", "Refunded", { tone: "fee" }),
-      moneyCol<Row>("refundable", "Still refundable", { width: 150 }),
-      moneyCol<Row>("net", "Reached you", { tone: "net" }),
-      threadCol<Row>("conversation_id", (id) => `/seller/messages?c=${id}`),
+      productCol<Row>("items", "image_url", (r) => `${r.units === 1 ? t("cell.item") : t("cell.items", { n: r.units })}, ${t("cell.orderShort", { id: r.order_id.slice(0, 8) })}`, { headerName: t("col.order") }),
+      dateCol<Row>("date", t("col.date"), { sort: "desc", locale }),
+      statusCol<Row>("status", t),
+      { field: "buyer", headerName: t("col.buyer"), width: 160 },
+      countryCol<Row>("buyer_country", t("col.shipsTo")),
+      marketCol<Row>("market", t("col.market")),
+      moneyCol<Row>("gross", t("col.paidByBuyer")),
+      moneyCol<Row>("refunded", t("col.refunded"), { tone: "fee" }),
+      moneyCol<Row>("refundable", t("col.stillRefundable"), { width: 150 }),
+      moneyCol<Row>("net", t("col.reachedYou"), { tone: "net" }),
+      threadCol<Row>("conversation_id", (id) => `/seller/messages?c=${id}`, t),
       {
         colId: "refund",
         headerName: "",
@@ -95,12 +97,12 @@ export function OperationsView({ period }: { period: DashboardPeriod }) {
         cellRenderer: (p: { data?: Row; node: { rowPinned?: string | null } }) =>
           p.data && !p.node.rowPinned && p.data.refundable.amount_minor > 0 ? (
             <button type="button" className="min-h-8 rounded-md border border-rule-strong px-2.5 text-sm font-medium hover:border-accent hover:text-accent" onClick={() => setOpen(p.data!)}>
-              Refund
+              {t("cell.refund")}
             </button>
           ) : null,
       },
     ],
-    [],
+    [t, locale],
   );
 
   const refresh = useCallback(() => setTick((t) => t + 1), []);
@@ -112,10 +114,10 @@ export function OperationsView({ period }: { period: DashboardPeriod }) {
     <div className="flex flex-col gap-6">
       <header className="flex flex-wrap items-end justify-between gap-4">
         <div className="max-w-2xl">
-          <h1 className="font-display text-[2rem] leading-tight font-bold tracking-[-0.025em]">Operations</h1>
-          <p className="mt-1 text-ink-3">What needs doing about orders, payments and refunds. Open any order to see its money trail or refund it.</p>
+          <h1 className="font-display text-[2rem] leading-tight font-bold tracking-[-0.025em]">{t("ops.title")}</h1>
+          <p className="mt-1 text-ink-3">{t("ops.intro")}</p>
         </div>
-        <nav aria-label="Period" className="inline-flex rounded-md border border-rule bg-sheet p-0.5">
+        <nav aria-label={t("period.label")} className="inline-flex rounded-md border border-rule bg-sheet p-0.5">
           {DASHBOARD_PERIODS.map((p) => (
             <Link
               key={p.key}
@@ -124,7 +126,7 @@ export function OperationsView({ period }: { period: DashboardPeriod }) {
               aria-current={p.key === period ? "true" : undefined}
               className={`inline-flex min-h-10 items-center rounded-[5px] px-3 text-sm ${p.key === period ? "bg-ink font-semibold text-sheet" : "text-ink-2 hover:bg-sheet-2 hover:text-ink"}`}
             >
-              {p.label}
+              {t(`period.${p.key}` as MessageKey)}
             </Link>
           ))}
         </nav>
@@ -140,26 +142,26 @@ export function OperationsView({ period }: { period: DashboardPeriod }) {
         <section aria-labelledby="attention" className="min-w-0 rounded-[10px] border border-rule bg-sheet p-4 md:p-5">
           <div className="flex items-baseline justify-between gap-2">
             <h2 id="attention" className="font-display text-xl font-semibold">
-              Needs attention
+              {t("ops.attention")}
             </h2>
-            {s && <span className="text-sm text-ink-3">{attentionCount === 0 ? "All clear" : `${attentionCount} items`}</span>}
+            {s && <span className="text-sm text-ink-3">{attentionCount === 0 ? t("ops.allClear") : t("ops.items", { n: attentionCount })}</span>}
           </div>
-          {!s && <p className="mt-3 text-sm text-ink-3">Checking orders, payments and messages…</p>}
-          {s && attentionCount === 0 && <p className="mt-3 text-sm text-ink-3">Nothing needs you right now. New buyer messages, failed payments and unusual refunds will show up here.</p>}
+          {!s && <p className="mt-3 text-sm text-ink-3">{t("ops.checking")}</p>}
+          {s && attentionCount === 0 && <p className="mt-3 text-sm text-ink-3">{t("ops.nothing")}</p>}
           {s && attentionCount > 0 && (
             <ul className="mt-1 divide-y divide-rule">
               {s.waiting_threads.length > 0 && (
                 <AttentionItem
                   tone="alert"
                   icon={<IconMessages />}
-                  title={`${s.waiting_threads.length} ${s.waiting_threads.length === 1 ? "buyer is" : "buyers are"} waiting on a reply`}
+                  title={s.waiting_threads.length === 1 ? t("ops.waitingOne") : t("ops.waiting", { n: s.waiting_threads.length })}
                   body={s.waiting_threads
                     .slice(0, 3)
                     .map((t) => `${t.buyer}: ${t.subject.toLowerCase()}`)
                     .join("; ")}
                   action={
                     <Link href="/seller/messages" className={actionLink}>
-                      Reply
+                      {t("ops.reply")}
                     </Link>
                   }
                 />
@@ -168,11 +170,11 @@ export function OperationsView({ period }: { period: DashboardPeriod }) {
                 <AttentionItem
                   tone="gold"
                   icon={<IconCheck />}
-                  title={`${s.pending_approvals} ${s.pending_approvals === 1 ? "proposal is" : "proposals are"} waiting for your approval`}
-                  body="Refunds and payouts the assistant proposed. Nothing moves until you approve."
+                  title={s.pending_approvals === 1 ? t("ops.approvalsOne") : t("ops.approvals", { n: s.pending_approvals })}
+                  body={t("ops.approvalsBody")}
                   action={
                     <Link href="/seller/approvals" className={actionLink}>
-                      Review
+                      {t("ops.review")}
                     </Link>
                   }
                 />
@@ -183,7 +185,7 @@ export function OperationsView({ period }: { period: DashboardPeriod }) {
                   tone={a.severity === "high" ? "alert" : a.severity === "medium" ? "gold" : "ink"}
                   icon={<IconPulse />}
                   title={a.summary}
-                  body={SEVERITY_LABEL[a.severity]}
+                  body={t(`sev.${a.severity}` as MessageKey)}
                 />
               ))}
             </ul>
@@ -192,10 +194,10 @@ export function OperationsView({ period }: { period: DashboardPeriod }) {
 
         <section aria-labelledby="by-status" className="min-w-0 rounded-[10px] border border-rule bg-sheet p-4 md:p-5">
           <h2 id="by-status" className="font-display text-xl font-semibold">
-            Orders by status
+            {t("ops.byStatus")}
           </h2>
-          <p className="text-sm text-ink-3">Click a status to filter the orders below.</p>
-          <div className="mt-3 grid grid-cols-2 gap-2" role="group" aria-label="Filter orders by status">
+          <p className="text-sm text-ink-3">{t("ops.byStatusHint")}</p>
+          <div className="mt-3 grid grid-cols-2 gap-2" role="group" aria-label={t("ops.filterStatus")}>
             {STATUSES.map((st) => {
               const active = status === st;
               return (
@@ -206,7 +208,7 @@ export function OperationsView({ period }: { period: DashboardPeriod }) {
                   onClick={() => setStatus(active ? null : st)}
                   className={`flex min-h-16 flex-col items-start justify-between rounded-md border p-3 text-left ${active ? "border-accent bg-accent-soft" : "border-rule hover:border-rule-strong hover:bg-sheet-2"}`}
                 >
-                  <StatusStamp status={st} label={ORDER_STATUS_LABEL[st]} />
+                  <StatusStamp status={st} label={t(`status.${st}` as MessageKey)} />
                   <span className="num font-display text-2xl font-semibold">{s ? (s.status_counts[st] ?? 0) : "–"}</span>
                 </button>
               );
@@ -214,7 +216,7 @@ export function OperationsView({ period }: { period: DashboardPeriod }) {
           </div>
           <label className="mt-3 flex min-h-11 items-center gap-2 text-sm text-ink-2">
             <input type="checkbox" className="h-4 w-4 accent-[var(--accent)]" checked={onlyRefundable} onChange={(e) => setOnlyRefundable(e.target.checked)} />
-            Only orders that can still be refunded{s ? ` (${s.refundable_orders})` : ""}
+            {t("ops.onlyRefundable")}{s ? ` (${s.refundable_orders})` : ""}
           </label>
         </section>
       </div>
@@ -222,7 +224,7 @@ export function OperationsView({ period }: { period: DashboardPeriod }) {
       <section aria-labelledby="orders-title" className="flex flex-col gap-3">
         <div className="flex flex-wrap items-baseline justify-between gap-2">
           <h2 id="orders-title" className="font-display text-xl font-semibold">
-            Orders
+            {t("ops.orders")}
           </h2>
           {(status || onlyRefundable) && (
             <button
@@ -233,12 +235,12 @@ export function OperationsView({ period }: { period: DashboardPeriod }) {
                 setOnlyRefundable(false);
               }}
             >
-              Clear status filter
+              {t("ops.clear")}
             </button>
           )}
         </div>
         <Grid<Row>
-          label="Orders"
+          label={t("ops.orders")}
           storageKey="seller-operations-v1"
           rowData={data}
           columnDefs={cols}
@@ -246,13 +248,13 @@ export function OperationsView({ period }: { period: DashboardPeriod }) {
           onRowClicked={(r) => setOpen(r)}
           externalFilter={filter}
           exportName={`orders-${period}`}
-          searchHint="buyer, product, market or status"
-          emptyMessage="No orders in this period."
+          searchHint={t("ledger.search.sales")}
+          emptyMessage={t("ledger.empty.sales")}
           rowHeight={52}
         />
       </section>
 
-      <AskAi label="Ask the operations assistant" hint="For questions, e.g. what you earned in Germany last month, or whether anything looks unusual.">
+      <AskAi label={t("ops.assistant")} hint={t("ops.assistantHint")}>
         <ChatPanel
           title="Operations Agent"
           agent="OPERATIONS"

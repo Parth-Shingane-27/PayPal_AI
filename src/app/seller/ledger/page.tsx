@@ -1,4 +1,4 @@
-import { parseDashboardPeriod } from "@/components/PeriodPicker";
+import { parseDashboardPeriod } from "@/lib/periods";
 import { LedgerView, type LedgerTab } from "./LedgerView";
 
 export const metadata = { title: "Sales ledger" };

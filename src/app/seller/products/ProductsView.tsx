@@ -3,9 +3,11 @@
 import Link from "next/link";
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { api, type Money } from "@/components/api";
+import { useI18n } from "@/components/i18n/I18nProvider";
 import { IconClose, IconSearch } from "@/components/icons";
+import type { MessageKey } from "@/lib/i18n/messages";
 import { ProductThumb, Sparkline } from "@/components/ui";
-import { COUNTRY_LABEL, formatCount, LANGUAGE_OF } from "@/lib/format";
+import { formatCount } from "@/lib/format";
 
 type Product = {
   id: string;
@@ -26,17 +28,18 @@ type Perf = { product_id: string; units: number; orders: number; views: number; 
 const MARKETS = ["en-US", "en-GB", "en-CA", "en-AU", "de-DE", "fr-FR", "es-ES", "it-IT", "es-MX", "ja-JP", "hi-IN"] as const;
 const CURRENCIES = ["USD", "EUR", "GBP", "CAD", "AUD", "MXN", "JPY"];
 type Sort = "newest" | "best" | "coverage" | "stock";
-const SORT_LABEL: Record<Sort, string> = { newest: "Newest first", best: "Best selling", coverage: "Fewest markets", stock: "Lowest stock" };
+const SORTS: Sort[] = ["newest", "best", "coverage", "stock"];
 
 /** 11 market slots: filled = published, dashed = draft, faint = not listed yet. */
 function Coverage({ listings }: { listings: Product["listings"] }) {
+  const { t } = useI18n();
   const by = new Map(listings.map((l) => [l.locale, l]));
   return (
-    <ul className="flex flex-wrap gap-1" aria-label="Markets">
+    <ul className="flex flex-wrap gap-1" aria-label={t("prod.markets")}>
       {MARKETS.map((m) => {
         const l = by.get(m);
         const country = m.slice(3);
-        const state = !l ? "Not listed" : l.status === "PUBLISHED" ? `Published, ${l.price.display}` : l.status === "DRAFT" ? `Draft, ${l.price.display}` : "Archived";
+        const state = !l ? t("prod.state.none") : l.status === "PUBLISHED" ? t("prod.state.published", { price: l.price.display }) : l.status === "DRAFT" ? t("prod.state.draft", { price: l.price.display }) : t("prod.state.archived");
         const cls = !l
           ? "border-rule text-ink-3/60"
           : l.status === "PUBLISHED"
@@ -47,7 +50,7 @@ function Coverage({ listings }: { listings: Product["listings"] }) {
         return (
           <li key={m}>
             <span
-              title={`${COUNTRY_LABEL[country] ?? country} (${LANGUAGE_OF[m]}): ${state}`}
+              title={`${t(`country.${country}` as MessageKey)} (${t(`langname.${m.slice(0, 2)}` as MessageKey)}): ${state}`}
               className={`inline-flex h-6 min-w-8 items-center justify-center rounded-[3px] border-[1.5px] px-1 text-[11px] font-bold tracking-wide ${cls}`}
             >
               {country}
@@ -61,6 +64,7 @@ function Coverage({ listings }: { listings: Product["listings"] }) {
 }
 
 function ProductCard({ p, perf }: { p: Product; perf?: Perf }) {
+  const { t } = useI18n();
   const published = p.listings.filter((l) => l.status === "PUBLISHED").length;
   const drafts = p.listings.filter((l) => l.status === "DRAFT").length;
   const missing = MARKETS.length - p.listings.length;
@@ -79,41 +83,41 @@ function ProductCard({ p, perf }: { p: Product; perf?: Perf }) {
             </Link>
           </h2>
           <p className="mt-0.5 text-sm text-ink-3">
-            {p.category ?? "Uncategorised"}, {p.sku}
+            {p.category ?? t("prod.uncategorised")}, {p.sku}
           </p>
           <p className="mt-1 text-sm text-ink-2">
-            Cost with shipping <span className="num font-medium">{p.cost.display}</span>
+            {t("prod.cost")} <span className="num font-medium">{p.cost.display}</span>
           </p>
         </div>
       </div>
 
       <div>
         <p className="mb-1.5 text-sm text-ink-2">
-          {published} of {MARKETS.length} markets live
-          {drafts > 0 && <span className="text-gold-ink">, {drafts} draft{drafts > 1 ? "s" : ""} to review</span>}
+          {t("prod.liveOf", { n: published, m: MARKETS.length })}
+          {drafts > 0 && <span className="text-gold-ink">, {t("prod.draftsToReview", { n: drafts })}</span>}
         </p>
         <Coverage listings={p.listings} />
       </div>
 
       <dl className="grid grid-cols-3 gap-2 border-t border-rule pt-3 text-sm">
         <div>
-          <dt className="text-ink-3">Sold, 30 days</dt>
+          <dt className="text-ink-3">{t("prod.sold30")}</dt>
           <dd className="num font-semibold">{perf ? formatCount(perf.units) : "–"}</dd>
         </div>
         <div>
-          <dt className="text-ink-3">Earned</dt>
+          <dt className="text-ink-3">{t("prod.earned")}</dt>
           <dd className="num font-semibold">{perf ? perf.net_home.display : "–"}</dd>
         </div>
         <div>
-          <dt className="text-ink-3">Stock</dt>
-          <dd className={`num font-semibold ${p.stock === 0 ? "text-alert" : p.stock < 10 ? "text-gold-ink" : ""}`}>{p.stock === 0 ? "Sold out" : p.stock}</dd>
+          <dt className="text-ink-3">{t("prod.stock")}</dt>
+          <dd className={`num font-semibold ${p.stock === 0 ? "text-alert" : p.stock < 10 ? "text-gold-ink" : ""}`}>{p.stock === 0 ? t("cell.soldOut") : p.stock}</dd>
         </div>
       </dl>
 
       <div className="flex items-center justify-between gap-3">
         {perf ? <Sparkline values={perf.weekly_units} label={`Weekly units for ${p.title}`} width={120} /> : <span />}
         <span className="relative z-10 text-sm font-medium text-accent">
-          {missing > 0 ? `Localize for ${missing} more` : drafts > 0 ? "Review drafts" : "Edit listings"}
+          {missing > 0 ? t("prod.localize", { n: missing }) : drafts > 0 ? t("prod.reviewDrafts") : t("prod.edit")}
         </span>
       </div>
     </li>
@@ -121,6 +125,7 @@ function ProductCard({ p, perf }: { p: Product; perf?: Perf }) {
 }
 
 function NewProductDrawer({ onClose, onCreated }: { onClose: () => void; onCreated: () => void }) {
+  const { t } = useI18n();
   const [form, setForm] = useState({ sku: "", title: "", description: "", source_locale: "en-US", cost: "", shipping: "", currency: "USD", margin: "30", material: "", size: "" });
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -159,7 +164,7 @@ function NewProductDrawer({ onClose, onCreated }: { onClose: () => void; onCreat
       });
       onCreated();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "The product could not be added.");
+      setError(err instanceof Error ? err.message : t("form.failed"));
     } finally {
       setBusy(false);
     }
@@ -171,48 +176,48 @@ function NewProductDrawer({ onClose, onCreated }: { onClose: () => void; onCreat
       <form onSubmit={create} className="absolute inset-y-0 right-0 flex w-[min(32rem,100vw)] flex-col overflow-y-auto bg-sheet shadow-[var(--shadow-overlay)]">
         <header className="flex items-center justify-between border-b border-rule p-5">
           <h2 id={`${id}-title`} className="font-display text-xl font-semibold">
-            Add a product
+            {t("prod.add")}
           </h2>
           <button type="button" onClick={onClose} className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-md hover:bg-sheet-2">
             <IconClose />
-            <span className="sr-only">Close</span>
+            <span className="sr-only">{t("drawer.close")}</span>
           </button>
         </header>
         <div className="flex flex-col gap-4 p-5">
-          <p className="text-sm text-ink-3">Write it once in your own language. The Listing assistant then translates and prices it for each market as drafts you approve.</p>
+          <p className="text-sm text-ink-3">{t("form.intro")}</p>
           <label className={label}>
-            Product name
+            {t("form.name")}
             <input ref={first} className={field} required value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} placeholder="Hand-thrown stoneware mug" />
           </label>
           <label className={label}>
-            Description
+            {t("form.description")}
             <textarea className={`${field} py-2`} required rows={4} value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} placeholder="What it is, how it's made, size and care." />
           </label>
           <div className="grid grid-cols-2 gap-3">
             <label className={label}>
-              SKU
+              {t("form.sku")}
               <input className={field} required value={form.sku} onChange={(e) => setForm({ ...form, sku: e.target.value.toUpperCase() })} placeholder="MUG-12OZ" />
             </label>
             <label className={label}>
-              Written in
+              {t("form.writtenIn")}
               <select className={field} value={form.source_locale} onChange={(e) => setForm({ ...form, source_locale: e.target.value })}>
                 {MARKETS.map((l) => (
                   <option key={l} value={l}>
-                    {LANGUAGE_OF[l]} ({l.slice(3)})
+                    {t(`langname.${l.slice(0, 2)}` as MessageKey)} ({l.slice(3)})
                   </option>
                 ))}
               </select>
             </label>
             <label className={label}>
-              Your cost
+              {t("form.cost")}
               <input className={`${field} num`} required inputMode="decimal" value={form.cost} onChange={(e) => setForm({ ...form, cost: e.target.value })} placeholder="18.00" />
             </label>
             <label className={label}>
-              Shipping cost
+              {t("form.shipping")}
               <input className={`${field} num`} inputMode="decimal" value={form.shipping} onChange={(e) => setForm({ ...form, shipping: e.target.value })} placeholder="9.00" />
             </label>
             <label className={label}>
-              Currency
+              {t("form.currency")}
               <select className={field} value={form.currency} onChange={(e) => setForm({ ...form, currency: e.target.value })}>
                 {CURRENCIES.map((c) => (
                   <option key={c}>{c}</option>
@@ -220,15 +225,15 @@ function NewProductDrawer({ onClose, onCreated }: { onClose: () => void; onCreat
               </select>
             </label>
             <label className={label}>
-              Target margin (%)
+              {t("form.margin")}
               <input className={`${field} num`} inputMode="decimal" value={form.margin} onChange={(e) => setForm({ ...form, margin: e.target.value })} />
             </label>
             <label className={label}>
-              Material (optional)
+              {t("form.material")}
               <input className={field} value={form.material} onChange={(e) => setForm({ ...form, material: e.target.value })} placeholder="Stoneware" />
             </label>
             <label className={label}>
-              Size (optional)
+              {t("form.size")}
               <input className={field} value={form.size} onChange={(e) => setForm({ ...form, size: e.target.value })} placeholder="12 oz" />
             </label>
           </div>
@@ -240,10 +245,10 @@ function NewProductDrawer({ onClose, onCreated }: { onClose: () => void; onCreat
         </div>
         <footer className="mt-auto flex gap-3 border-t border-rule p-5">
           <button type="submit" disabled={busy} className="min-h-11 flex-1 rounded-md bg-accent px-4 font-semibold text-sheet hover:opacity-90 disabled:opacity-50">
-            {busy ? "Adding…" : "Add product"}
+            {busy ? t("form.busy") : t("form.submit")}
           </button>
           <button type="button" onClick={onClose} className="min-h-11 rounded-md border border-rule-strong px-4 font-medium hover:bg-sheet-2">
-            Cancel
+            {t("form.cancel")}
           </button>
         </footer>
       </form>
@@ -252,11 +257,12 @@ function NewProductDrawer({ onClose, onCreated }: { onClose: () => void; onCreat
 }
 
 export function ProductsView() {
+  const { t } = useI18n();
   const [products, setProducts] = useState<Product[] | null>(null);
   const [perf, setPerf] = useState<Map<string, Perf>>(new Map());
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
-  const [category, setCategory] = useState("All");
+  const [category, setCategory] = useState("__all");
   const [sort, setSort] = useState<Sort>("newest");
   const [adding, setAdding] = useState(false);
   const [tick, setTick] = useState(0);
@@ -265,20 +271,20 @@ export function ProductsView() {
   useEffect(() => {
     api<{ products: Product[] }>("/api/products").then(
       (r) => setProducts(r.products),
-      (e: unknown) => setError(e instanceof Error ? e.message : "Products could not be loaded."),
+      (e: unknown) => setError(e instanceof Error ? e.message : t("ops.error")),
     );
     api<{ rows: Perf[] }>("/api/analytics/seller/products?period=last_30_days").then(
       (r) => setPerf(new Map(r.rows.map((x) => [x.product_id, x]))),
       () => {},
     );
-  }, [tick]);
+  }, [tick, t]);
 
-  const categories = useMemo(() => ["All", ...Array.from(new Set((products ?? []).map((p) => p.category).filter((c): c is string => Boolean(c)))).sort()], [products]);
+  const categories = useMemo(() => ["__all", ...Array.from(new Set((products ?? []).map((p) => p.category).filter((c): c is string => Boolean(c)))).sort()], [products]);
 
   const shown = useMemo(() => {
     const q = query.trim().toLowerCase();
     const list = (products ?? []).filter(
-      (p) => (category === "All" || p.category === category) && (!q || `${p.title} ${p.sku} ${p.category ?? ""}`.toLowerCase().includes(q)),
+      (p) => (category === "__all" || p.category === category) && (!q || `${p.title} ${p.sku} ${p.category ?? ""}`.toLowerCase().includes(q)),
     );
     const live = (p: Product) => p.listings.filter((l) => l.status === "PUBLISHED").length;
     return [...list].sort((a, b) =>
@@ -306,19 +312,19 @@ export function ProductsView() {
           <h1 className="font-display text-[2rem] leading-tight font-bold tracking-[-0.025em]">Products</h1>
           <p className="mt-1 text-ink-3">
             {products
-              ? `${totals.products} products with ${totals.live} live listings${totals.drafts ? ` and ${totals.drafts} ${totals.drafts === 1 ? "draft" : "drafts"} to review` : ""}${totals.soldOut ? `. ${totals.soldOut} sold out` : ""}.`
-              : "Loading your catalogue…"}
+              ? `${t("prod.summary", { n: totals.products, live: totals.live })}${totals.drafts ? ` ${t("prod.summaryDrafts", { n: totals.drafts })}` : ""}${totals.soldOut ? `. ${t("prod.summarySoldOut", { n: totals.soldOut })}` : ""}.`
+              : t("prod.loading")}
           </p>
         </div>
         <button type="button" onClick={() => setAdding(true)} className="min-h-11 rounded-md bg-accent px-5 font-semibold text-sheet hover:opacity-90">
-          Add a product
+          {t("prod.add")}
         </button>
       </header>
 
       <div className="flex flex-col gap-3">
         <div className="flex flex-wrap items-center gap-2">
           <label htmlFor={searchId} className="relative min-w-0 flex-1 basis-60">
-            <span className="sr-only">Search products</span>
+            <span className="sr-only">{t("prod.searchLabel")}</span>
             <span className="pointer-events-none absolute inset-y-0 left-3 flex items-center text-ink-3">
               <IconSearch className="h-4 w-4" />
             </span>
@@ -327,22 +333,22 @@ export function ProductsView() {
               type="search"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search by name, SKU or category"
+              placeholder={t("prod.search")}
               className="min-h-11 w-full rounded-md border border-rule bg-sheet pr-3 pl-9 text-ink placeholder:text-ink-3 focus:border-accent"
             />
           </label>
           <label className="flex items-center gap-2 text-sm text-ink-2">
-            Sort
+            {t("prod.sort")}
             <select value={sort} onChange={(e) => setSort(e.target.value as Sort)} className="min-h-11 rounded-md border border-rule bg-sheet px-3 text-ink">
-              {(Object.keys(SORT_LABEL) as Sort[]).map((k) => (
+              {SORTS.map((k) => (
                 <option key={k} value={k}>
-                  {SORT_LABEL[k]}
+                  {t(`sort.${k}` as MessageKey)}
                 </option>
               ))}
             </select>
           </label>
         </div>
-        <div className="flex flex-wrap gap-2" role="group" aria-label="Category">
+        <div className="flex flex-wrap gap-2" role="group" aria-label={t("prod.category")}>
           {categories.map((c) => (
             <button
               key={c}
@@ -351,19 +357,19 @@ export function ProductsView() {
               onClick={() => setCategory(c)}
               className={`min-h-10 rounded-full border px-3.5 text-sm ${category === c ? "border-ink bg-ink font-semibold text-sheet" : "border-rule-strong text-ink-2 hover:border-ink hover:text-ink"}`}
             >
-              {c}
+              {c === "__all" ? t("prod.all") : c}
             </button>
           ))}
         </div>
-        <ul className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-ink-3" aria-label="Market key">
+        <ul className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-ink-3" aria-label={t("prod.key")}>
           <li className="inline-flex items-center gap-1.5">
-            <span className="h-3 w-4 rounded-[2px] bg-accent" aria-hidden /> Live
+            <span className="h-3 w-4 rounded-[2px] bg-accent" aria-hidden /> {t("prod.live")}
           </li>
           <li className="inline-flex items-center gap-1.5">
-            <span className="h-3 w-4 rounded-[2px] border-[1.5px] border-dashed border-gold-ink" aria-hidden /> Draft to review
+            <span className="h-3 w-4 rounded-[2px] border-[1.5px] border-dashed border-gold-ink" aria-hidden /> {t("prod.draftKey")}
           </li>
           <li className="inline-flex items-center gap-1.5">
-            <span className="h-3 w-4 rounded-[2px] border-[1.5px] border-rule" aria-hidden /> Not listed yet
+            <span className="h-3 w-4 rounded-[2px] border-[1.5px] border-rule" aria-hidden /> {t("prod.notListed")}
           </li>
         </ul>
       </div>
@@ -375,8 +381,8 @@ export function ProductsView() {
       )}
       {products && shown.length === 0 && (
         <div className="rounded-[10px] border border-dashed border-rule-strong p-8 text-center">
-          <p className="font-display text-lg">{products.length === 0 ? "No products yet" : "Nothing matches"}</p>
-          <p className="mt-1 text-sm text-ink-3">{products.length === 0 ? "Add your first product, then let the Listing assistant localize it." : "Try another search or category."}</p>
+          <p className="font-display text-lg">{products.length === 0 ? t("prod.emptyTitle") : t("prod.noMatch")}</p>
+          <p className="mt-1 text-sm text-ink-3">{products.length === 0 ? t("prod.emptyBody") : t("prod.noMatchBody")}</p>
         </div>
       )}
       {!products && !error && (

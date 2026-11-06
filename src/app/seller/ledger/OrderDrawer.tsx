@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { api, type Money as MoneyT } from "@/components/api";
 import { IconClose, IconMessages } from "@/components/icons";
+import { useI18n } from "@/components/i18n/I18nProvider";
 import { RefundForm } from "@/components/RefundForm";
 import { FeeBar, MarketStamp, Money, ProductThumb, StatusStamp } from "@/components/ui";
 import { formatDate } from "@/lib/format";
@@ -55,6 +56,7 @@ function Line({ label, value, tone, estimate }: { label: string; value: MoneyT |
 
 /** Side panel with the money trail for one order. Esc or the close button returns focus to the grid. */
 export function OrderDrawer({ row, onClose, onChanged }: { row: DrawerOrder | null; onClose: () => void; onChanged?: () => void }) {
+  const { t, locale } = useI18n();
   const [reload, setReload] = useState(0);
   const [result, setResult] = useState<{ id: string; details?: Details; error?: string } | null>(null);
   const current = row && result?.id === row.order_id ? result : null;
@@ -68,9 +70,9 @@ export function OrderDrawer({ row, onClose, onChanged }: { row: DrawerOrder | nu
     const id = row.order_id;
     api<Details>(`/api/orders/${id}`).then(
       (d) => setResult({ id, details: d }),
-      (e: unknown) => setResult({ id, error: e instanceof Error ? e.message : "Could not load this order." }),
+      (e: unknown) => setResult({ id, error: e instanceof Error ? e.message : t("ops.error") }),
     );
-  }, [row, reload]);
+  }, [row, reload, t]);
 
   useEffect(() => {
     if (!row) return;
@@ -90,7 +92,7 @@ export function OrderDrawer({ row, onClose, onChanged }: { row: DrawerOrder | nu
 
   return (
     <div className="fixed inset-0 z-40" role="dialog" aria-modal="true" aria-labelledby="drawer-title">
-      <button type="button" className="absolute inset-0 bg-ink/35" aria-label="Close order details" onClick={onClose} />
+      <button type="button" className="absolute inset-0 bg-ink/35" aria-label={t("drawer.closeDetails")} onClick={onClose} />
       <aside className="absolute inset-y-0 right-0 flex w-[min(30rem,100vw)] flex-col overflow-y-auto bg-sheet shadow-[var(--shadow-overlay)]">
         <header className="flex items-start gap-3 border-b border-rule p-5">
           <ProductThumb src={row.image_url} alt="" size={52} />
@@ -101,28 +103,28 @@ export function OrderDrawer({ row, onClose, onChanged }: { row: DrawerOrder | nu
             <p className="mt-1 flex flex-wrap items-center gap-2 text-sm text-ink-3">
               <span>{row.buyer}</span>
               <MarketStamp locale={row.market} />
-              <span className="num">{formatDate(row.date)}</span>
+              <span className="num">{formatDate(row.date, locale)}</span>
             </p>
           </div>
           <button ref={closeRef} type="button" onClick={onClose} className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-md hover:bg-sheet-2">
             <IconClose />
-            <span className="sr-only">Close</span>
+            <span className="sr-only">{t("drawer.close")}</span>
           </button>
         </header>
 
         <div className="flex flex-col gap-6 p-5">
           <div className="flex items-center justify-between">
             <StatusStamp status={row.status} />
-            <span className="num text-xs text-ink-3">Order {row.order_id.slice(0, 8)}</span>
+            <span className="num text-xs text-ink-3">{t("drawer.order", { id: row.order_id.slice(0, 8) })}</span>
           </div>
 
           {error && <p className="rounded-md bg-alert-soft p-3 text-sm text-alert-ink">{error}</p>}
-          {!details && !error && <p className="text-sm text-ink-3">Loading the money trail…</p>}
+          {!details && !error && <p className="text-sm text-ink-3">{t("drawer.loading")}</p>}
 
           {paid && (
             <section aria-labelledby="trail">
               <h3 id="trail" className="mb-2 font-semibold">
-                Money trail
+                {t("drawer.trail")}
               </h3>
               <FeeBar
                 gross={paid.gross.amount_minor}
@@ -136,12 +138,12 @@ export function OrderDrawer({ row, onClose, onChanged }: { row: DrawerOrder | nu
                 }}
               />
               <dl className="mt-3 divide-y divide-rule text-sm">
-                <Line label="Paid by buyer" value={paid.gross} />
-                <Line label="PayPal fee" value={paid.paypal_fee} tone="fee" estimate={paid.paypal_fee_is_estimate} />
-                <Line label="Platform fee" value={paid.platform_fee} tone="fee" />
-                <Line label="Currency conversion" value={paid.fx_cost} tone="fee" />
-                <Line label="Net to you at capture" value={paid.net_to_seller} />
-                <Line label="Reached you after refunds" value={row.net} tone="net" />
+                <Line label={t("drawer.paid")} value={paid.gross} />
+                <Line label={t("drawer.paypal")} value={paid.paypal_fee} tone="fee" estimate={paid.paypal_fee_is_estimate} />
+                <Line label={t("drawer.platform")} value={paid.platform_fee} tone="fee" />
+                <Line label={t("drawer.fx")} value={paid.fx_cost} tone="fee" />
+                <Line label={t("drawer.netCapture")} value={paid.net_to_seller} />
+                <Line label={t("drawer.netAfter")} value={row.net} tone="net" />
               </dl>
             </section>
           )}
@@ -149,24 +151,24 @@ export function OrderDrawer({ row, onClose, onChanged }: { row: DrawerOrder | nu
           {declined.length > 0 && (
             <section aria-labelledby="declined">
               <h3 id="declined" className="mb-2 font-semibold">
-                Payment attempts
+                {t("drawer.attempts")}
               </h3>
               <ul className="space-y-1 text-sm">
                 {declined.map((p, i) => (
                   <li key={i} className="flex justify-between">
-                    <span>Attempt {i + 1} declined</span>
-                    <span className="text-ink-3">{p.failure_reason ?? "No reason given"}</span>
+                    <span>{t("drawer.attempt", { n: i + 1 })}</span>
+                    <span className="text-ink-3">{p.failure_reason ?? t("drawer.noReason")}</span>
                   </li>
                 ))}
               </ul>
-              <p className="mt-2 text-sm text-ink-3">Nothing was captured, so there is nothing to refund.</p>
+              <p className="mt-2 text-sm text-ink-3">{t("drawer.nothing")}</p>
             </section>
           )}
 
           {details && details.refunds.length > 0 && (
             <section aria-labelledby="refunds">
               <h3 id="refunds" className="mb-2 font-semibold">
-                Refunds
+                {t("drawer.refunds")}
               </h3>
               <ul className="space-y-3 text-sm">
                 {details.refunds.map((r) => (
@@ -176,7 +178,7 @@ export function OrderDrawer({ row, onClose, onChanged }: { row: DrawerOrder | nu
                       <span className="text-xs text-ink-3">{r.status.toLowerCase()}</span>
                     </div>
                     <p className="mt-1 text-ink-2">{r.reason}</p>
-                    {r.seller_debit && <p className="mt-1 text-xs text-ink-3">Cost to you: {r.seller_debit.display}</p>}
+                    {r.seller_debit && <p className="mt-1 text-xs text-ink-3">{t("drawer.cost", { amount: r.seller_debit.display })}</p>}
                   </li>
                 ))}
               </ul>
@@ -186,8 +188,7 @@ export function OrderDrawer({ row, onClose, onChanged }: { row: DrawerOrder | nu
           {details && details.payment_status.still_refundable.amount_minor > 0 &&
             (paid?.is_demo_seed_data ? (
               <p className="rounded-md bg-sheet-2 p-3 text-sm text-ink-2">
-                {details.payment_status.still_refundable.display} is still refundable, but this is a seeded demo order, so PayPal has no real capture to refund. Refunds work on orders paid through
-                checkout.
+                {t("drawer.seed", { amount: details.payment_status.still_refundable.display })}
               </p>
             ) : (
               <RefundForm
@@ -207,7 +208,7 @@ export function OrderDrawer({ row, onClose, onChanged }: { row: DrawerOrder | nu
               className="inline-flex min-h-11 items-center justify-center gap-2 rounded-md border border-rule-strong px-4 font-medium text-ink hover:border-accent hover:text-accent"
             >
               <IconMessages />
-              Open the conversation with {row.buyer}
+              {t("drawer.thread", { name: row.buyer })}
             </Link>
           )}
         </div>

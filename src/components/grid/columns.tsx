@@ -3,7 +3,9 @@
 import type { ColDef, ValueFormatterParams, ValueGetterParams } from "ag-grid-community";
 import type { CustomCellRendererProps } from "ag-grid-react";
 import Link from "next/link";
-import { compareMoney, formatBps, formatCount, formatDate, type MoneyLike, ORDER_STATUS_LABEL } from "@/lib/format";
+import { compareMoney, formatBps, formatCount, formatDate, type MoneyLike } from "@/lib/format";
+import type { Translate } from "@/lib/i18n/core";
+import type { MessageKey } from "@/lib/i18n/messages";
 import { IconMessages } from "../icons";
 import { CountryStamp, FeeBar, MarketStamp, Money, ProductThumb, Sparkline, StatusStamp } from "../ui";
 
@@ -38,11 +40,12 @@ export function moneyCol<T extends Row>(field: keyof T & string, headerName: str
   };
 }
 
-export function dateCol<T extends Row>(field: keyof T & string, headerName: string, opts: Partial<ColDef<T>> = {}): ColDef<T> {
+export function dateCol<T extends Row>(field: keyof T & string, headerName: string, opts: Partial<ColDef<T>> & { locale?: string } = {}): ColDef<T> {
+  const { locale = "en-GB", ...rest } = opts;
   return {
     field: field as ColDef<T>["field"],
     headerName,
-    width: 128,
+    width: 156,
     filter: "agDateColumnFilter",
     filterValueGetter: (p: ValueGetterParams<T>) => {
       const v = p.data?.[field];
@@ -50,10 +53,10 @@ export function dateCol<T extends Row>(field: keyof T & string, headerName: stri
       const d = new Date(v);
       return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
     },
-    valueFormatter: (p: ValueFormatterParams<T, string>) => formatDate(p.value),
-    getQuickFilterText: (p) => formatDate(p.value as string),
+    valueFormatter: (p: ValueFormatterParams<T, string>) => formatDate(p.value, locale),
+    getQuickFilterText: (p) => formatDate(p.value as string, locale),
     cellClass: "num",
-    ...opts,
+    ...rest,
   };
 }
 
@@ -77,13 +80,14 @@ export function countryCol<T extends Row>(field: keyof T & string, headerName = 
   };
 }
 
-export function statusCol<T extends Row>(field: keyof T & string, opts: Partial<ColDef<T>> = {}): ColDef<T> {
+export function statusCol<T extends Row>(field: keyof T & string, t: Translate, opts: Partial<ColDef<T>> = {}): ColDef<T> {
+  const label = (v: string | undefined) => (v ? t(`status.${v}` as MessageKey) : "");
   return {
     field: field as ColDef<T>["field"],
-    headerName: "Status",
-    width: 150,
-    valueFormatter: (p: ValueFormatterParams<T, string>) => (p.value ? (ORDER_STATUS_LABEL[p.value] ?? p.value) : ""),
-    getQuickFilterText: (p) => ORDER_STATUS_LABEL[p.value as string] ?? "",
+    headerName: t("col.status"),
+    width: 160,
+    valueFormatter: (p: ValueFormatterParams<T, string>) => label(p.value ?? undefined),
+    getQuickFilterText: (p) => label(p.value as string),
     cellRenderer: (p: CustomCellRendererProps<T, string>) => (p.value ? <StatusStamp status={p.value} /> : null),
     ...opts,
   };
@@ -171,14 +175,14 @@ export function sparkCol<T extends Row>(field: keyof T & string, headerName: str
 }
 
 /** Mini fee anatomy for one sale. */
-export function feeBarCol<T extends Row>(get: (row: T) => { gross: number; net: number; paypal: number; platform: number; fx: number; refund: number } | null): ColDef<T> {
+export function feeBarCol<T extends Row>(get: (row: T) => { gross: number; net: number; paypal: number; platform: number; fx: number; refund: number } | null, t: Translate): ColDef<T> {
   return {
     colId: "anatomy",
-    headerName: "Where it went",
-    width: 160,
+    headerName: t("col.whereWent"),
+    width: 170,
     sortable: false,
     filter: false,
-    headerTooltip: "Gold reached the maker; blue PayPal, pink platform, violet currency conversion, red refunds.",
+    headerTooltip: t("cell.whereWentTip"),
     cellRenderer: (p: CustomCellRendererProps<T>) => {
       const v = p.data && !p.node.rowPinned ? get(p.data) : null;
       if (!v) return null;
@@ -191,10 +195,10 @@ export function feeBarCol<T extends Row>(get: (row: T) => { gross: number; net: 
   };
 }
 
-export function threadCol<T extends Row>(field: keyof T & string, href: (id: string) => string): ColDef<T> {
+export function threadCol<T extends Row>(field: keyof T & string, href: (id: string) => string, t: Translate): ColDef<T> {
   return {
     field: field as ColDef<T>["field"],
-    headerName: "Thread",
+    headerName: t("col.thread"),
     width: 96,
     sortable: false,
     filter: false,
@@ -202,7 +206,7 @@ export function threadCol<T extends Row>(field: keyof T & string, href: (id: str
       p.value ? (
         <Link href={href(p.value)} className="inline-flex min-h-8 items-center gap-1 text-accent hover:underline" onClick={(e) => e.stopPropagation()}>
           <IconMessages className="h-4 w-4" />
-          <span>Open</span>
+          <span>{t("cell.open")}</span>
         </Link>
       ) : null,
   };

@@ -3,6 +3,7 @@
 import type { ColDef } from "ag-grid-community";
 import { useEffect, useMemo, useState } from "react";
 import { api, type Money as MoneyT } from "../api";
+import { useI18n } from "../i18n/I18nProvider";
 import { Grid } from "../grid/Grid";
 import { bpsCol, countryCol, dateCol, marketCol, moneyCol, productCol, statusCol, threadCol } from "../grid/columns";
 
@@ -27,31 +28,32 @@ export type PurchaseRow = {
 
 /** Every purchase, with how much of the price reached the maker after fees. */
 export function PurchasesGrid({ pageSize = 20 }: { pageSize?: number }) {
+  const { t, locale } = useI18n();
   const [rows, setRows] = useState<PurchaseRow[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
     void api<{ rows: PurchaseRow[] }>("/api/analytics/buyer/purchases").then(
       (r) => setRows(r.rows),
-      (e: unknown) => setError(e instanceof Error ? e.message : "Your orders could not be loaded."),
+      (e: unknown) => setError(e instanceof Error ? e.message : t("purch.error")),
     );
-  }, []);
+  }, [t]);
 
   const cols = useMemo<ColDef<PurchaseRow>[]>(
     () => [
-      productCol<PurchaseRow>("items", "image_url", (r) => `${r.seller}`, { headerName: "Purchase" }),
-      dateCol<PurchaseRow>("date", "Date", { sort: "desc" }),
-      statusCol<PurchaseRow>("status"),
-      { field: "seller", headerName: "Maker", width: 190 },
-      countryCol<PurchaseRow>("seller_country", "Ships from"),
-      marketCol<PurchaseRow>("market", "Bought in"),
-      moneyCol<PurchaseRow>("total", "You paid"),
-      moneyCol<PurchaseRow>("refunded", "Refunded to you", { width: 150 }),
-      moneyCol<PurchaseRow>("fees", "Fees and conversion", { tone: "muted", width: 170 }),
-      moneyCol<PurchaseRow>("reached_maker", "Reached the maker", { tone: "net", width: 170 }),
-      bpsCol<PurchaseRow>("reached_maker_bps", "Share to maker", { digits: 0, width: 130 }),
-      threadCol<PurchaseRow>("conversation_id", (id) => `/buyer/messages?c=${id}`),
+      productCol<PurchaseRow>("items", "image_url", (r) => `${r.seller}`, { headerName: t("col.purchase") }),
+      dateCol<PurchaseRow>("date", t("col.date"), { sort: "desc", locale }),
+      statusCol<PurchaseRow>("status", t),
+      { field: "seller", headerName: t("col.maker"), width: 190 },
+      countryCol<PurchaseRow>("seller_country", t("col.shipsFrom")),
+      marketCol<PurchaseRow>("market", t("col.boughtIn")),
+      moneyCol<PurchaseRow>("total", t("col.youPaid")),
+      moneyCol<PurchaseRow>("refunded", t("col.refundedToYou"), { width: 150 }),
+      moneyCol<PurchaseRow>("fees", t("col.feesConversion"), { tone: "muted", width: 170 }),
+      moneyCol<PurchaseRow>("reached_maker", t("col.reachedMaker"), { tone: "net", width: 170 }),
+      bpsCol<PurchaseRow>("reached_maker_bps", t("col.shareToMaker"), { digits: 0, width: 130 }),
+      threadCol<PurchaseRow>("conversation_id", (id) => `/buyer/messages?c=${id}`, t),
     ],
-    [],
+    [t, locale],
   );
 
   return (
@@ -62,14 +64,14 @@ export function PurchasesGrid({ pageSize = 20 }: { pageSize?: number }) {
         </p>
       )}
       <Grid<PurchaseRow>
-        label="Your purchases"
+        label={t("purch.label")}
         storageKey="buyer-purchases-v1"
         rowData={rows}
         columnDefs={cols}
         getRowId={(r) => r.order_id}
         exportName="my-purchases"
-        searchHint="maker, product or country"
-        emptyMessage="No purchases yet. Find something in the shop."
+        searchHint={t("purch.search")}
+        emptyMessage={t("purch.empty")}
         rowHeight={52}
         pageSize={pageSize}
       />

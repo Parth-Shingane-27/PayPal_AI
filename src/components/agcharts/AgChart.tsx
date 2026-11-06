@@ -37,14 +37,14 @@ export function useChartTheme(): AgChartTheme {
           legend: {
             position: "bottom",
             spacing: 18,
-            item: { label: { color: ink2, fontSize: 13, fontFamily }, marker: { shape: "square", size: 11 }, paddingX: 18 },
+            item: { label: { color: ink2, fontSize: 13, fontFamily }, marker: { shape: "square", size: 11 } },
           },
           axes: {
             number: { label: { color: ink3, fontSize: 12, fontFamily }, gridLine: { style: [{ stroke: rule, lineDash: [3, 4] }] }, line: { width: 0 } },
             category: { label: { color: ink3, fontSize: 12, fontFamily }, line: { stroke: rule }, gridLine: { enabled: false } },
           },
         },
-        bar: { series: { cornerRadius: 3, strokeWidth: 0, highlightStyle: { item: { fillOpacity: 1, strokeWidth: 0 } } } },
+        bar: { series: { cornerRadius: 3, strokeWidth: 0 } },
       },
     } as AgChartTheme;
   }, [mode]);

@@ -1,4 +1,4 @@
-import { parseDashboardPeriod } from "@/components/PeriodPicker";
+import { parseDashboardPeriod } from "@/lib/periods";
 import { OperationsView } from "./OperationsView";
 
 export const metadata = { title: "Operations" };

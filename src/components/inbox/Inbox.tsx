@@ -3,8 +3,10 @@
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useId, useRef, useState } from "react";
-import { formatAge, formatDate, LANGUAGE_OF } from "@/lib/format";
+import { formatAge, formatDate } from "@/lib/format";
+import type { MessageKey } from "@/lib/i18n/messages";
 import { api, type Money as MoneyT } from "../api";
+import { useI18n } from "../i18n/I18nProvider";
 import { IconBack, IconSend } from "../icons";
 import { CountryStamp, ProductThumb, StatusStamp } from "../ui";
 
@@ -54,6 +56,7 @@ function notifyUnreadChanged() {
 }
 
 export function Inbox({ role }: { role: "SELLER" | "BUYER" }) {
+  const { t } = useI18n();
   const router = useRouter();
   const pathname = usePathname();
   const params = useSearchParams();
@@ -70,9 +73,9 @@ export function Inbox({ role }: { role: "SELLER" | "BUYER" }) {
       const r = await api<{ conversations: ThreadSummary[] }>("/api/messages");
       setThreads(r.conversations);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Messages could not be loaded.");
+      setError(e instanceof Error ? e.message : t("ops.error"));
     }
-  }, []);
+  }, [t]);
 
   const loadThread = useCallback(async (id: string, markRead: boolean) => {
     try {
@@ -84,16 +87,16 @@ export function Inbox({ role }: { role: "SELLER" | "BUYER" }) {
         notifyUnreadChanged();
       }
     } catch (e) {
-      setError(e instanceof Error ? e.message : "This conversation could not be loaded.");
+      setError(e instanceof Error ? e.message : t("ops.error"));
     }
-  }, []);
+  }, [t]);
 
   useEffect(() => {
     api<{ conversations: ThreadSummary[] }>("/api/messages").then(
       (r) => setThreads(r.conversations),
-      (e: unknown) => setError(e instanceof Error ? e.message : "Messages could not be loaded."),
+      (e: unknown) => setError(e instanceof Error ? e.message : t("ops.error")),
     );
-  }, []);
+  }, [t]);
 
   useEffect(() => {
     if (!selectedId) return;
@@ -120,11 +123,9 @@ export function Inbox({ role }: { role: "SELLER" | "BUYER" }) {
     <div className="flex flex-col gap-4">
       <header className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <h1 className="font-display text-[2rem] leading-tight font-bold tracking-[-0.025em]">Messages</h1>
+          <h1 className="font-display text-[2rem] leading-tight font-bold tracking-[-0.025em]">{t("msg.title")}</h1>
           <p className="mt-1 text-ink-3">
-            {role === "SELLER"
-              ? "Questions and updates from buyers in every market. Messages written in another language show a translation underneath."
-              : "Your conversations with makers. Their replies show a translation into your language underneath."}
+            {role === "SELLER" ? t("msg.introSeller") : t("msg.introBuyer")}
           </p>
         </div>
       </header>
@@ -137,8 +138,8 @@ export function Inbox({ role }: { role: "SELLER" | "BUYER" }) {
 
       <div className="grid min-h-[34rem] overflow-hidden rounded-[10px] border border-rule bg-sheet md:grid-cols-[21rem_minmax(0,1fr)]">
         {/* Thread list */}
-        <section aria-label="Conversations" className={`flex min-h-0 flex-col border-rule md:border-r ${selectedId ? "hidden md:flex" : "flex"}`}>
-          <div className="flex items-center gap-1 border-b border-rule p-2" role="group" aria-label="Show">
+        <section aria-label={t("msg.conversations")} className={`flex min-h-0 flex-col border-rule md:border-r ${selectedId ? "hidden md:flex" : "flex"}`}>
+          <div className="flex items-center gap-1 border-b border-rule p-2" role="group" aria-label={t("msg.show")}>
             {(["all", "unread"] as const).map((f) => (
               <button
                 key={f}
@@ -147,42 +148,42 @@ export function Inbox({ role }: { role: "SELLER" | "BUYER" }) {
                 onClick={() => setFilter(f)}
                 className={`min-h-10 rounded-md px-3 text-sm ${filter === f ? "bg-ink font-semibold text-sheet" : "text-ink-2 hover:bg-sheet-2"}`}
               >
-                {f === "all" ? "All" : `${role === "SELLER" ? "Waiting on you" : "New replies"}${unreadTotal ? ` (${unreadTotal})` : ""}`}
+                {f === "all" ? t("msg.all") : `${role === "SELLER" ? t("msg.waiting") : t("msg.newReplies")}${unreadTotal ? ` (${unreadTotal})` : ""}`}
               </button>
             ))}
           </div>
           <ul className="min-h-0 flex-1 divide-y divide-rule overflow-y-auto md:max-h-[40rem]">
-            {threads === null && <li className="p-4 text-sm text-ink-3">Loading conversations…</li>}
+            {threads === null && <li className="p-4 text-sm text-ink-3">{t("msg.loading")}</li>}
             {threads !== null && shown.length === 0 && (
               <li className="p-4 text-sm text-ink-3">
-                {filter === "unread" ? (role === "SELLER" ? "Nothing is waiting on you." : "No new replies.") : role === "BUYER" ? "No conversations yet. Use Ask the maker on any product in the shop." : "No conversations yet."}
+                {filter === "unread" ? (role === "SELLER" ? t("msg.nothingWaiting") : t("msg.noNew")) : role === "BUYER" ? t("msg.emptyBuyer") : t("msg.empty")}
               </li>
             )}
-            {shown.map((t) => {
-              const active = t.id === selectedId;
+            {shown.map((th) => {
+              const active = th.id === selectedId;
               return (
-                <li key={t.id}>
+                <li key={th.id}>
                   <button
                     type="button"
-                    onClick={() => select(t.id)}
+                    onClick={() => select(th.id)}
                     aria-current={active ? "true" : undefined}
                     className={`flex w-full gap-3 px-3 py-3 text-left ${active ? "bg-accent-soft" : "hover:bg-sheet-2"}`}
                   >
-                    <ProductThumb src={t.product?.image_url} alt="" size={40} />
+                    <ProductThumb src={th.product?.image_url} alt="" size={40} />
                     <span className="min-w-0 flex-1">
                       <span className="flex items-baseline justify-between gap-2">
-                        <span className={`truncate ${t.unread > 0 ? "font-semibold text-ink" : "text-ink-2"}`}>{t.counterpart.name}</span>
-                        <span className="num shrink-0 text-xs text-ink-3">{now ? formatAge(t.last_message_at, now) : ""}</span>
+                        <span className={`truncate ${th.unread > 0 ? "font-semibold text-ink" : "text-ink-2"}`}>{th.counterpart.name}</span>
+                        <span className="num shrink-0 text-xs text-ink-3">{now ? formatAge(th.last_message_at, now) : ""}</span>
                       </span>
-                      <span className="block truncate text-sm text-ink-2">{t.subject}</span>
+                      <span className="block truncate text-sm text-ink-2">{th.subject}</span>
                       <span className="flex items-center gap-2">
                         <span className="block min-w-0 flex-1 truncate text-sm text-ink-3">
-                          {t.last_message?.from_me ? "You: " : ""}
-                          {t.last_message?.preview}
+                          {th.last_message?.from_me ? t("msg.youPrefix") : ""}
+                          {th.last_message?.preview}
                         </span>
-                        {t.unread > 0 && (
+                        {th.unread > 0 && (
                           <span className="inline-flex min-w-5 shrink-0 items-center justify-center rounded-full bg-alert px-1.5 text-xs leading-5 font-semibold text-sheet">
-                            {t.unread}
+                            {th.unread}
                             <span className="sr-only"> unread</span>
                           </span>
                         )}
@@ -196,14 +197,14 @@ export function Inbox({ role }: { role: "SELLER" | "BUYER" }) {
         </section>
 
         {/* Conversation */}
-        <section aria-label="Conversation" className={`min-h-0 flex-col ${selectedId ? "flex" : "hidden md:flex"}`}>
+        <section aria-label={t("msg.conversation")} className={`min-h-0 flex-col ${selectedId ? "flex" : "hidden md:flex"}`}>
           {!selectedId && (
             <div className="m-auto max-w-sm p-8 text-center text-ink-3">
-              <p className="font-display text-lg text-ink">Pick a conversation</p>
-              <p className="mt-1 text-sm">{role === "SELLER" ? "Threads with a red count are waiting for your reply." : "Threads with a red count have a new reply from the maker."}</p>
+              <p className="font-display text-lg text-ink">{t("msg.pick")}</p>
+              <p className="mt-1 text-sm">{role === "SELLER" ? t("msg.pickSeller") : t("msg.pickBuyer")}</p>
             </div>
           )}
-          {selectedId && !thread && <p className="p-6 text-sm text-ink-3">Loading…</p>}
+          {selectedId && !thread && <p className="p-6 text-sm text-ink-3">{t("msg.loading")}</p>}
           {thread && <ThreadView thread={thread} now={now} onBack={() => select(null)} onSent={(m) => {
             setLoaded((t) => (t ? { ...t, messages: [...t.messages, m] } : t));
             void loadList();
@@ -215,6 +216,7 @@ export function Inbox({ role }: { role: "SELLER" | "BUYER" }) {
 }
 
 function ThreadView({ thread, now, onBack, onSent }: { thread: Thread; now: number | null; onBack: () => void; onSent: (m: Message) => void }) {
+  const { t, locale } = useI18n();
   const other = thread.viewer === "SELLER" ? thread.buyer : thread.seller;
   const me = thread.viewer === "SELLER" ? thread.seller : thread.buyer;
   const endRef = useRef<HTMLDivElement>(null);
@@ -229,17 +231,17 @@ function ThreadView({ thread, now, onBack, onSent }: { thread: Thread; now: numb
       <header className="flex flex-wrap items-center gap-3 border-b border-rule px-4 py-3">
         <button type="button" onClick={onBack} className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-md hover:bg-sheet-2 md:hidden">
           <IconBack />
-          <span className="sr-only">Back to conversations</span>
+          <span className="sr-only">{t("msg.back")}</span>
         </button>
         <div className="min-w-0 flex-1">
           <p className="flex items-center gap-2 font-semibold">
             <span className="truncate">{other.name}</span>
             <CountryStamp country={other.country} />
-            <span className="text-sm font-normal text-ink-3">writes in {LANGUAGE_OF[other.locale] ?? other.locale}</span>
+            <span className="text-sm font-normal text-ink-3">{t("msg.writesIn", { lang: t(`langname.${other.locale.slice(0, 2)}` as MessageKey) })}</span>
           </p>
           <p className="truncate text-sm text-ink-3">{thread.subject}</p>
         </div>
-        {thread.status === "CLOSED" && <span className="rounded-[3px] bg-sheet-2 px-2 py-0.5 text-xs text-ink-2">Resolved</span>}
+        {thread.status === "CLOSED" && <span className="rounded-[3px] bg-sheet-2 px-2 py-0.5 text-xs text-ink-2">{t("msg.resolved")}</span>}
       </header>
 
       {(thread.product || thread.order) && (
@@ -261,14 +263,14 @@ function ThreadView({ thread, now, onBack, onSent }: { thread: Thread; now: numb
             <span className="flex items-center gap-2">
               <StatusStamp status={thread.order.status} />
               <span className="num text-ink-3">
-                {thread.order.total.display}, {formatDate(thread.order.paid_at)}
+                {thread.order.total.display}, {formatDate(thread.order.paid_at, locale)}
               </span>
             </span>
           )}
         </div>
       )}
 
-      <ol className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto px-4 py-5 md:max-h-[30rem]" aria-label={`Messages with ${other.name}`}>
+      <ol className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto px-4 py-5 md:max-h-[30rem]" aria-label={t("msg.with", { name: other.name })}>
         {thread.messages.map((m) => (
           <li key={m.id} className={`flex flex-col ${m.from_me ? "items-end" : "items-start"}`}>
             <div className={`max-w-[min(34rem,88%)] rounded-[10px] px-3.5 py-2.5 ${m.from_me ? "rounded-br-[3px] bg-accent text-sheet" : "rounded-bl-[3px] border border-rule bg-paper text-ink"}`}>
@@ -277,13 +279,13 @@ function ThreadView({ thread, now, onBack, onSent }: { thread: Thread; now: numb
               </p>
               {m.translation && (
                 <p lang={me.locale} className="mt-2 border-t border-dashed border-rule-strong pt-2 text-[0.92rem] text-ink-2">
-                  <span className="mb-0.5 block text-xs text-ink-3">Translated from {LANGUAGE_OF[m.body_locale] ?? m.body_locale}</span>
+                  <span className="mb-0.5 block text-xs text-ink-3">{t("msg.translatedFrom", { lang: t(`langname.${m.body_locale.slice(0, 2)}` as MessageKey) })}</span>
                   {m.translation}
                 </p>
               )}
             </div>
             <span className="num mt-1 text-xs text-ink-3">
-              {m.from_me ? "You" : other.name.split(" ")[0]}, {now ? formatAge(m.at, now) : ""}
+              {m.from_me ? t("msg.you") : other.name.split(" ")[0]}, {now ? formatAge(m.at, now) : ""}
             </span>
           </li>
         ))}
@@ -296,6 +298,7 @@ function ThreadView({ thread, now, onBack, onSent }: { thread: Thread; now: numb
 }
 
 function Composer({ threadId, to, onSent }: { threadId: string; to: string; onSent: (m: Message) => void }) {
+  const { t } = useI18n();
   const [body, setBody] = useState("");
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
@@ -310,9 +313,9 @@ function Composer({ threadId, to, onSent }: { threadId: string; to: string; onSe
       const m = await api<Message>(`/api/messages/${threadId}`, { body: { body: text } });
       setBody("");
       onSent(m);
-      setStatus("Sent.");
+      setStatus(t("msg.sent"));
     } catch (e) {
-      setStatus(e instanceof Error ? e.message : "The message was not sent. Try again.");
+      setStatus(e instanceof Error ? e.message : t("msg.failed"));
     } finally {
       setBusy(false);
     }
@@ -327,7 +330,7 @@ function Composer({ threadId, to, onSent }: { threadId: string; to: string; onSe
       }}
     >
       <label htmlFor={id} className="sr-only">
-        Reply to {to}
+        {t("msg.replyTo", { name: to })}
       </label>
       <div className="flex items-end gap-2">
         <textarea
@@ -341,7 +344,7 @@ function Composer({ threadId, to, onSent }: { threadId: string; to: string; onSe
             }
           }}
           rows={2}
-          placeholder={`Reply to ${to}`}
+          placeholder={t("msg.replyTo", { name: to })}
           className="min-h-11 flex-1 resize-y rounded-md border border-rule-strong bg-sheet px-3 py-2 text-ink placeholder:text-ink-3 focus:border-accent"
         />
         <button
@@ -350,11 +353,11 @@ function Composer({ threadId, to, onSent }: { threadId: string; to: string; onSe
           className="inline-flex min-h-11 items-center gap-2 rounded-md bg-accent px-4 font-semibold text-sheet disabled:opacity-50"
         >
           <IconSend className="h-4 w-4" />
-          {busy ? "Sending…" : "Send"}
+          {busy ? t("msg.sending") : t("msg.send")}
         </button>
       </div>
       <p className="mt-1 flex justify-between text-xs text-ink-3" aria-live="polite">
-        <span>{status ?? "Ctrl or ⌘ + Enter sends. Live replies are sent as written, without translation."}</span>
+        <span>{status ?? t("msg.hint")}</span>
         <span className="num">
           {body.length}/{MAX}
         </span>

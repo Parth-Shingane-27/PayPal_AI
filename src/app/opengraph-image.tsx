@@ -5,11 +5,11 @@ export const size = { width: 1200, height: 630 };
 export const contentType = "image/png";
 
 const SEGMENTS = [
-  { w: 85, c: "#c99a2e" },
-  { w: 5.5, c: "#2a78d6" },
-  { w: 5, c: "#e87ba4" },
-  { w: 1.5, c: "#6250d6" },
-  { w: 3, c: "#e34948" },
+  { w: 85, c: "#2a78d6" },
+  { w: 5.5, c: "#eb6834" },
+  { w: 5, c: "#6250d6" },
+  { w: 1.5, c: "#e87ba4" },
+  { w: 3, c: "#b0306a" },
 ];
 const STAMPS = ["US", "GB", "CA", "AU", "DE", "FR", "ES", "IT", "MX", "JP", "IN"];
 

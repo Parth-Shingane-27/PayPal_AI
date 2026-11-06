@@ -11,11 +11,22 @@ const SHORT_DAY = new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "sho
 const MONTH = new Intl.DateTimeFormat("en-GB", { month: "short", timeZone: "UTC" });
 const MONTH_YEAR = new Intl.DateTimeFormat("en-GB", { month: "long", year: "numeric", timeZone: "UTC" });
 
-export const formatDate = (iso: string | null | undefined) => (iso ? SHORT_DATE.format(new Date(iso)) : "");
-export const formatDay = (iso: string) => SHORT_DAY.format(new Date(iso));
+const dateFormats = new Map<string, Intl.DateTimeFormat>();
+/** "04 Nov 2026" (or the locale's equivalent), always in UTC. */
+export const formatDate = (iso: string | null | undefined, locale = "en-GB") => {
+  if (!iso) return "";
+  if (locale === "en-GB") return SHORT_DATE.format(new Date(iso));
+  let f = dateFormats.get(locale);
+  if (!f) dateFormats.set(locale, (f = new Intl.DateTimeFormat(locale, { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" })));
+  return f.format(new Date(iso));
+};
+export const formatDay = (iso: string, locale = "en-GB") =>
+  locale === "en-GB" ? SHORT_DAY.format(new Date(iso)) : new Intl.DateTimeFormat(locale, { day: "numeric", month: "short", timeZone: "UTC" }).format(new Date(iso));
 /** "2026-06" -> "Jun" */
-export const formatMonthKey = (key: string) => MONTH.format(new Date(`${key}-01T00:00:00Z`));
-export const formatMonthYear = (key: string) => MONTH_YEAR.format(new Date(`${key}-01T00:00:00Z`));
+export const formatMonthKey = (key: string, locale = "en-GB") =>
+  (locale === "en-GB" ? MONTH : new Intl.DateTimeFormat(locale, { month: "short", timeZone: "UTC" })).format(new Date(`${key}-01T00:00:00Z`));
+export const formatMonthYear = (key: string, locale = "en-GB") =>
+  (locale === "en-GB" ? MONTH_YEAR : new Intl.DateTimeFormat(locale, { month: "long", year: "numeric", timeZone: "UTC" })).format(new Date(`${key}-01T00:00:00Z`));
 
 /** Basis points as a percentage: 1234 -> "12.3%". */
 export function formatBps(bps: number | null | undefined, digits = 1): string {

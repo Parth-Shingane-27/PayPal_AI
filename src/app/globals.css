@@ -31,12 +31,13 @@
   --positive-ink: #5e440a;
   --focus: #7d5d10;
   --shadow-overlay: 0 18px 50px -12px rgb(94 68 10 / 0.22);
-  /* Chart categorical slots, fixed order (validated: dataviz validate_palette, light + dark). */
-  --series-1: #c99a2e;
-  --series-2: #2a78d6;
-  --series-3: #e87ba4;
-  --series-4: #6250d6;
-  --series-5: #e34948;
+  /* Chart categorical slots, fixed order (validated: dataviz validate_palette, light + dark).
+     Deliberately no gold: gold is the interface colour, never a data colour. */
+  --series-1: #2a78d6;
+  --series-2: #eb6834;
+  --series-3: #6250d6;
+  --series-4: #e87ba4;
+  --series-5: #b0306a;
 }
 
 /* Light is the default; dark only when the viewer picks it with the toggle. */
@@ -64,11 +65,11 @@
   --positive-ink: #f2d98f;
   --focus: #e6c25a;
   --shadow-overlay: 0 18px 50px -12px rgb(0 0 0 / 0.65);
-  --series-1: #b8891f;
-  --series-2: #3987e5;
-  --series-3: #d55181;
-  --series-4: #9085e9;
-  --series-5: #e66767;
+  --series-1: #3987e5;
+  --series-2: #d95926;
+  --series-3: #9085e9;
+  --series-4: #d55181;
+  --series-5: #a0501f;
 }
 
 @theme inline {

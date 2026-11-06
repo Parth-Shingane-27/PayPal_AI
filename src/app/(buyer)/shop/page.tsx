@@ -1,5 +1,6 @@
 import { AskAi } from "@/components/AskAi";
 import { ChatPanel } from "@/components/ChatPanel";
+import { getT } from "@/lib/i18n/server";
 import { getMarket } from "@/server/domain/markets";
 import { buyerPage } from "@/server/page-auth";
 import { listPublishedListings } from "@/server/services/search";
@@ -10,11 +11,12 @@ export const metadata = { title: "Shop" };
 export default async function ShopPage() {
   const buyer = await buyerPage();
   const market = getMarket(buyer.market);
+  const t = await getT();
   const listings = await listPublishedListings(market.locale);
   return (
     <div className="space-y-6">
       <ProductList key={market.locale} listings={listings} />
-      <AskAi label="Ask the shopping assistant" hint={`Describe what you want in any language. Prices are in ${market.currency} and include shipping.`}>
+      <AskAi label={t("shop.assistant")} hint={t("shop.assistantHint", { currency: market.currency })}>
         <ChatPanel
           key={`chat-${market.locale}`}
           resumeKey={market.locale}

@@ -35,14 +35,14 @@ export function Sparkline({ values, width = 96, height = 26, label, unit = "unit
       >
         <defs>
           <linearGradient id={gradient} x1="0" x2="0" y1="0" y2="1">
-            <stop offset="0" stopColor="var(--accent)" stopOpacity="0.22" />
-            <stop offset="1" stopColor="var(--accent)" stopOpacity="0" />
+            <stop offset="0" stopColor="var(--series-1)" stopOpacity="0.22" />
+            <stop offset="1" stopColor="var(--series-1)" stopOpacity="0" />
           </linearGradient>
         </defs>
         <path d={`${d} L${(2 + (values.length - 1) * step).toFixed(1)} ${height - 2} L2 ${height - 2}Z`} fill={`url(#${gradient})`} />
-        <path d={d} fill="none" stroke="var(--accent)" strokeWidth="1.6" strokeLinejoin="round" strokeLinecap="round" />
+        <path d={d} fill="none" stroke="var(--series-1)" strokeWidth="1.6" strokeLinejoin="round" strokeLinecap="round" />
         {at && <line x1={at[0]} x2={at[0]} y1={0} y2={height} stroke="var(--ink-3)" strokeWidth="1" strokeDasharray="2 2" />}
-        {(at ?? last) && <circle cx={(at ?? last)![0]} cy={(at ?? last)![1]} r={at ? 3 : 2.4} fill="var(--accent)" stroke="var(--sheet)" strokeWidth={at ? 1.5 : 0} />}
+        {(at ?? last) && <circle cx={(at ?? last)![0]} cy={(at ?? last)![1]} r={at ? 3 : 2.4} fill="var(--series-1)" stroke="var(--sheet)" strokeWidth={at ? 1.5 : 0} />}
       </svg>
       {hover !== null && (
         <span className="pointer-events-none absolute bottom-full left-1/2 z-30 mb-1.5 -translate-x-1/2 rounded-md border border-rule bg-sheet px-2 py-1 text-xs whitespace-nowrap text-ink shadow-[var(--shadow-overlay)]">
