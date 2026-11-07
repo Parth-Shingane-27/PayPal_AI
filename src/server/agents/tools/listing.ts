@@ -2,9 +2,9 @@ import { z } from "zod";
 import { frankfurter } from "../../clients/frankfurter";
 import { prisma } from "../../db";
 import { listMarkets, MARKET_LOCALES } from "../../domain/markets";
-import { SUPPORTED_CURRENCIES } from "../../domain/money";
+import { money, SUPPORTED_CURRENCIES } from "../../domain/money";
 import { AppError } from "../../errors";
-import { productView, saveListingDraft, SEO_TITLE_MAX } from "../../services/catalog";
+import { createProduct, productFromForm, productView, saveListingDraft, SEO_TITLE_MAX } from "../../services/catalog";
 import { type PriceQuote, quotePrice } from "../../services/pricing";
 import { defineTool } from "../tool";
 import { decimalAmount, sellerOf, uuid } from "./common";
@@ -104,4 +104,116 @@ const saveListingDraftTool = defineTool({
   },
 });
 
-export const LISTING_TOOLS = [getProductTool, listMarketsTool, getFxRateTool, suggestPriceTool, saveListingDraftTool];
+/** A SKU from the title's first words, e.g. "Hand-thrown stoneware mug" → "HAND-THROWN-STONEWARE". */
+function skuFromTitle(title: string): string {
+  const base = title
+    .normalize("NFKD")
+    .replace(/[^\w\s-]/g, "")
+    .trim()
+    .split(/\s+/)
+    .slice(0, 3)
+    .join("-")
+    .toUpperCase()
+    .slice(0, 40);
+  return base || "PRODUCT";
+}
+
+async function uniqueSku(sellerId: string, wanted: string): Promise<string> {
+  const taken = new Set(
+    (await prisma.product.findMany({ where: { seller_id: sellerId, sku: { startsWith: wanted } }, select: { sku: true } })).map((p) => p.sku),
+  );
+  if (!taken.has(wanted)) return wanted;
+  for (let n = 2; ; n++) if (!taken.has(`${wanted}-${n}`)) return `${wanted}-${n}`;
+}
+
+type ProductForm = Parameters<typeof productFromForm>[0];
+
+const previewProductTool = defineTool({
+  name: "preview_product",
+  description:
+    "Check a new product built from facts the seller gave you, before creating it. Never guess cost or shipping: ask for them first. Returns a preview_id and the summary to show the seller (title, description, SKU, cost, shipping, margin, material, size, each amount with a `display` string). It creates nothing. Show the summary, ask the seller to confirm, and end your reply; create_product with this preview_id works only after the seller has replied.",
+  kind: "read",
+  input: z.object({
+    title: z.string().min(1).max(200).describe("Product name in the language the seller wrote it in."),
+    description: z.string().min(1).max(5000).describe("What it is, how it is made, size and care, using only facts the seller gave."),
+    written_in: z.enum(MARKET_LOCALES).nullable().describe("Market locale whose language the title and description are in, or null for the seller's own market."),
+    cost: decimalAmount().describe("What one unit costs the seller to make or buy, as the seller stated it."),
+    shipping: decimalAmount().nullable().describe("Shipping cost per unit as the seller stated it, or null if the seller said shipping is free or included."),
+    cost_currency: z.enum(SUPPORTED_CURRENCIES).describe("Currency of cost and shipping, as the seller stated it."),
+    margin_percent: z.string().regex(/^\d{1,2}(\.\d{1,2})?$/).nullable().describe("Target profit margin in percent, e.g. 35, or null for the default of 30."),
+    sku: z.string().min(1).max(64).nullable().describe("The seller's stock code, or null to generate one from the title."),
+    material: z.string().max(200).nullable().describe("Main material if the seller said it, else null."),
+    size: z.string().max(200).nullable().describe("Size or capacity if the seller said it, else null."),
+  }),
+  async run(ctx, input) {
+    const sellerId = sellerOf(ctx);
+    const sku = input.sku ? input.sku.trim().toUpperCase() : await uniqueSku(sellerId, skuFromTitle(input.title));
+    if (input.sku && (await prisma.product.findUnique({ where: { seller_id_sku: { seller_id: sellerId, sku } } }))) {
+      throw new AppError("CONFLICT", `The seller already has a product with SKU ${sku}. Ask for another SKU or pass null to generate one.`);
+    }
+    const attributes: Record<string, string> = {};
+    if (input.material?.trim()) attributes.material = input.material.trim();
+    if (input.size?.trim()) attributes.size = input.size.trim();
+    const form: ProductForm = {
+      sku,
+      title: input.title.trim(),
+      description: input.description.trim(),
+      source_locale: input.written_in ?? ctx.market.locale,
+      cost: input.cost,
+      shipping: input.shipping ?? "0",
+      cost_currency: input.cost_currency,
+      margin_percent: input.margin_percent ?? "30",
+      attributes,
+    };
+    const p = productFromForm(form); // validates amounts and margin now, so the summary is what gets created
+    return {
+      preview_id: ctx.actionId,
+      form,
+      summary: {
+        title: p.title,
+        description: p.description,
+        sku: p.sku,
+        sku_generated: !input.sku,
+        written_in: p.source_locale,
+        cost: money(p.cost_minor, p.cost_currency, ctx.market.locale),
+        shipping: money(p.shipping_minor, p.cost_currency, ctx.market.locale),
+        margin_percent: p.margin_bps / 100,
+        margin_is_default: !input.margin_percent,
+        ...attributes,
+      },
+      message: "Nothing is created yet. Show this summary, ask the seller to confirm, and wait for their reply before calling create_product.",
+    };
+  },
+});
+
+const createProductTool = defineTool({
+  name: "create_product",
+  description:
+    "Create the product exactly as previewed by preview_product, after the seller confirmed the summary in a later message. Pass the preview_id. It fails if the seller has not replied since the preview; if they asked for changes, call preview_product again and ask again. Returns the new product_id for suggest_price and save_listing_draft. It creates no listings and publishes nothing.",
+  kind: "draft",
+  input: z.object({ preview_id: uuid().describe("preview_id from preview_product in this conversation.") }),
+  async run(ctx, input) {
+    const sellerId = sellerOf(ctx);
+    const [preview, session] = await Promise.all([
+      prisma.agentAction.findFirst({
+        where: { id: input.preview_id, tool: "preview_product", status: "SUCCEEDED", seller_id: sellerId, session_id: ctx.sessionId },
+      }),
+      prisma.agentSession.findUnique({ where: { id: ctx.sessionId }, select: { run_started_at: true } }),
+    ]);
+    if (!preview?.output) throw new AppError("NOT_FOUND", "Preview not found. Call preview_product first and use its preview_id.");
+    // The seller must have sent a message after seeing the preview: it has to predate this run.
+    if (!session?.run_started_at || preview.created_at >= session.run_started_at) {
+      throw new AppError("INVALID_INPUT", "The seller has not confirmed this preview yet. Show them the summary, ask them to confirm, and end your reply.");
+    }
+    const { form } = preview.output as { form: ProductForm };
+    const product = await createProduct(sellerId, productFromForm(form));
+    return {
+      product_id: product.id,
+      sku: product.sku,
+      title: product.title,
+      message: "Product created with no listings yet. Ask which markets to list it in, then price and draft each one.",
+    };
+  },
+});
+
+export const LISTING_TOOLS = [getProductTool, previewProductTool, createProductTool, listMarketsTool, getFxRateTool, suggestPriceTool, saveListingDraftTool];

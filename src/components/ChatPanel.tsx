@@ -30,6 +30,8 @@ const AGENT_LABEL: Record<AgentName, string> = { LISTING: "Listing", SHOPPING: "
 /** What each tool does, in plain words, for the progress list while the assistant works. */
 const STEP_LABEL: Record<string, string> = {
   get_product: "Reading the product",
+  preview_product: "Checking the product details",
+  create_product: "Creating the product",
   list_markets: "Checking the markets",
   get_fx_rate: "Checking today's exchange rate",
   suggest_price: "Working out a local price",
