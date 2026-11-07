@@ -20,7 +20,7 @@ export function MarketPicker({ current }: { current: string }) {
     <label className="flex items-center gap-2 text-sm">
       <span className="sr-only">{t("market.label")}</span>
       <select
-        className="min-h-11 rounded-md border border-rule-strong bg-sheet px-2 py-1 text-ink md:min-h-9"
+        className="min-h-11 rounded-md border border-rule-strong bg-sheet py-1 pl-3 text-ink md:min-h-10"
         value={current}
         onChange={async (e) => {
           await api("/api/me/market", { body: { locale: e.target.value } });

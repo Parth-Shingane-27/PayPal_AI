@@ -6,6 +6,7 @@ import { formatBps, formatDate, formatDay } from "@/lib/format";
 import { localeOf } from "@/lib/i18n/core";
 import type { MessageKey } from "@/lib/i18n/messages";
 import { getT, getUiLang } from "@/lib/i18n/server";
+import { buyerPath } from "@/lib/routes";
 import { buyerPage } from "@/server/page-auth";
 import { buyerOverview } from "@/server/services/analytics";
 import { listConversations } from "@/server/services/messages";
@@ -32,6 +33,7 @@ function PassportStamp({ country, makers, orders, rotate, t }: { country: string
 
 export default async function BuyerJournal() {
   const buyer = await buyerPage();
+  const base = buyerPath(buyer.buyerId);
   const t = await getT();
   const uiLocale = localeOf(await getUiLang());
   const [o, threads] = await Promise.all([buyerOverview(buyer.buyerId, buyer.market), listConversations(buyer)]);
@@ -55,7 +57,7 @@ export default async function BuyerJournal() {
           </p>
           <h1 className="font-display text-[2rem] leading-tight font-bold tracking-[-0.025em] md:text-[2.4rem]">{t("journal.title", { name: buyer.name.split(" ")[0] ?? buyer.name })}</h1>
         </div>
-        <Link href="/shop" className="inline-flex min-h-11 items-center rounded-md bg-accent px-5 font-semibold text-sheet">
+        <Link href={`${base}/shop`} className="inline-flex min-h-11 items-center rounded-md bg-accent px-5 font-semibold text-sheet">
           {t("journal.browse")}
         </Link>
       </header>
@@ -98,14 +100,14 @@ export default async function BuyerJournal() {
           <BuyerSpendChart months={o.monthly} currency={o.reference_currency} locale={buyer.market} title={t("spend.title")} />
         </Panel>
         <Panel labelledBy="threads-title">
-          <SectionHeading id="threads-title" title={t("conv.title")} aside={<Link href="/buyer/messages" className="text-accent hover:underline">{t("conv.all")}</Link>} />
+          <SectionHeading id="threads-title" title={t("conv.title")} aside={<Link href={`${base}/messages`} className="text-accent hover:underline">{t("conv.all")}</Link>} />
           {openThreads.length === 0 ? (
             <p className="text-sm text-ink-3">{t("conv.none")}</p>
           ) : (
             <ul className="divide-y divide-rule">
               {openThreads.map((th) => (
                 <li key={th.id}>
-                  <Link href={`/buyer/messages?c=${th.id}`} className="flex gap-3 py-2.5 hover:bg-sheet-2">
+                  <Link href={`${base}/messages?c=${th.id}`} className="flex gap-3 py-2.5 hover:bg-sheet-2">
                     <ProductThumb src={th.product?.image_url} alt="" size={36} />
                     <span className="min-w-0 flex-1">
                       <span className="flex items-baseline justify-between gap-2">
@@ -127,7 +129,7 @@ export default async function BuyerJournal() {
       </div>
 
       <section aria-labelledby="purchases-title">
-        <SectionHeading id="purchases-title" title={t("purch.title")} aside={<Link href="/orders" className="text-accent hover:underline">{t("purch.history")}</Link>} />
+        <SectionHeading id="purchases-title" title={t("purch.title")} aside={<Link href={`${base}/orders`} className="text-accent hover:underline">{t("purch.history")}</Link>} />
         <PurchasesGrid pageSize={10} />
       </section>
 
@@ -167,7 +169,7 @@ export default async function BuyerJournal() {
               ))}
             </ul>
           )}
-          <Link href="/shop" className="mt-4 inline-flex min-h-10 items-center text-sm font-medium text-accent hover:underline">
+          <Link href={`${base}/shop`} className="mt-4 inline-flex min-h-10 items-center text-sm font-medium text-accent hover:underline">
             {t("popular.see")}
           </Link>
         </Panel>

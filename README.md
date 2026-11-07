@@ -9,7 +9,7 @@ See [ps.md](ps.md) for the problem statement and [architecture.md](architecture.
 - **Code computes.** Every price, fee, exchange rate, balance, forecast and anomaly comes from deterministic code behind a tool. Tool results carry money as integer minor units plus a `display` string; prompts require agents to quote only those strings.
 - **Agents only propose money movement.** No tool captures, refunds or pays out. A payment is approved by the buyer's click in PayPal and captured by a normal API route. Refunds and payouts are written as `PENDING_APPROVAL` proposals that a seller approves on `/seller/approvals`, through a route no tool can reach.
 - **Identity comes from the session.** Tool inputs never contain seller, buyer or locale. The runtime injects the actor and market from the signed session cookie, and every service filters by owner, so another tenant's id reads as "not found".
-- **Everything is audited.** Every tool call, PayPal call and agent run writes an `agent_actions` row, shown as a timeline on `/seller/activity` and beside every chat.
+- **Everything is audited.** Every tool call, PayPal call and agent run writes an `agent_actions` row, shown as a timeline on `/seller/<sellerId>/activity` and beside every chat.
 
 ## Stack
 
@@ -55,12 +55,16 @@ npm run eval -- --smoke                         # LIVE: one conversation per age
 
 ## Dashboards
 
-- **Seller overview** (`/seller`): KPIs against the previous period, the "where every sale went" fee anatomy, net earnings by month, markets, best sellers and buyers waiting on a reply. Totals in the seller's home currency use fixed reference rates (`src/server/domain/reference-rates.ts`); every sale keeps its own currency.
-- **Sales ledger** (`/seller/ledger`): AG Grid Community with Sales, Products, Buyers and Markets tabs. Quick filter, column filters, column chooser, CSV export, saved layout, pinned totals row, and an order drawer with the money trail.
-- **Messages** (`/seller/messages`, `/buyer/messages`): live buyer-seller threads. Seeded messages carry a translation into the other party's language; buyers start threads with "Ask the maker" in the shop.
-- **Buyer journal** (`/buyer`): passport of countries bought from, spending by month, purchases grid with how much reached the maker, and suggestions from the buyer's market.
+- **Seller overview** (`/seller/<sellerId>`): KPIs against the previous period, the "where every sale went" fee anatomy, net earnings by month, markets, best sellers and buyers waiting on a reply. Totals in the seller's home currency use fixed reference rates (`src/server/domain/reference-rates.ts`); every sale keeps its own currency.
+- **Sales ledger** (`/seller/<sellerId>/ledger`): AG Grid Community with Sales, Products, Buyers and Markets tabs. Quick filter, column filters, column chooser, CSV export, saved layout, pinned totals row, and an order drawer with the money trail.
+- **Messages** (`/seller/<sellerId>/messages`, `/buyer/<buyerId>/messages`): live buyer-seller threads. Seeded messages carry a translation into the other party's language; buyers start threads with "Ask the maker" in the shop.
+- **Buyer journal** (`/buyer/<buyerId>`): passport of countries bought from, spending by month, purchases grid with how much reached the maker, and suggestions from the buyer's market.
 
 Seed data is deterministic (`prisma/seed/`). Only the original US/DE listings are queued for embeddings; run `SEED_EMBED=all npm run db:seed` to embed everything.
+
+## Addresses
+
+Every signed-in page lives at the account's own address: `/seller/<sellerId>/…` for sellers (overview, ledger, messages, products, treasury, operations, approvals, activity, assistant) and `/buyer/<buyerId>/…` for buyers (journal, shop, cart, orders, messages, checkout/return). The id in the address only names the account; the signed session decides access, and an address with someone else's id is a 404. Older shared addresses (`/seller/ledger`, `/shop`, a PayPal return link saved earlier) redirect to the signed-in account's own address (`src/proxy.ts`).
 
 ## How it fits together
 
@@ -83,7 +87,7 @@ Worker (Fastify + BullMQ): POST /webhooks/paypal → verify → store once → q
 | Agent | Reached from | Tools |
 |---|---|---|
 | Listing | product editor | get_product, list_markets, get_fx_rate, suggest_price, save_listing_draft, handoff |
-| Shopping | `/shop` (buyers only) | search_products, compare_products, add_to_cart, update_cart, view_cart, create_paypal_order |
+| Shopping | `/buyer/<buyerId>/shop` (buyers only) | search_products, compare_products, add_to_cart, update_cart, view_cart, create_paypal_order |
 | Treasury | treasury screen | get_balances, estimate_fees, forecast_earnings, compare_selling_direct, propose_payout_schedule, handoff |
 | Operations | operations screen | query_orders, get_order_details, get_payment_status, earnings_by_market, detect_anomalies, propose_refund, handoff |
 
@@ -123,11 +127,11 @@ One-time sandbox setup in the PayPal developer dashboard:
 
 Then walk the flow (worker and app running):
 1. **List.** Log in at `/login` as *Maple & Pine Goods*. Open a product and ask the Listing Agent: *"Localize this for Germany, Japan and India."* Check the per-market table, then click **Publish** on each draft. Within a few seconds the worker embeds them ("indexing for search" disappears).
-2. **Shop in Hindi.** Sign out and log in as *Priya Sharma* (market hi-IN). On `/shop`, ask: *"मुझे लकड़ी का सर्विंग बोर्ड चाहिए, एक कार्ट में डालो और भुगतान शुरू करो।"* The agent searches, adds the item after you confirm, and calls `create_paypal_order`. A PayPal button appears in the chat.
+2. **Shop in Hindi.** Sign out and log in as *Priya Sharma* (market hi-IN). On the shop page, ask: *"मुझे लकड़ी का सर्विंग बोर्ड चाहिए, एक कार्ट में डालो और भुगतान शुरू करो।"* The agent searches, adds the item after you confirm, and calls `create_paypal_order`. A PayPal button appears in the chat.
 3. **Pay.** Click the PayPal button and approve with the sandbox buyer account. The capture route records the payment with PayPal's actual fee. `/orders` shows it as PAID, and the chat's activity panel shows the `paypal.orders.create` and `paypal.orders.capture` calls. The redirect flow (the link under the button, returning to `/checkout/return`) works too, and so does paying from `/cart`.
-4. **Refund.** Log in as the seller and open Operations. Ask the agent to refund that order. A proposal appears on `/seller/approvals`. Click **Approve**: PayPal processes the refund, and the outcome and seller debit show on the card. Clicking Approve again changes nothing.
+4. **Refund.** Log in as the seller and open Operations. Ask the agent to refund that order. A proposal appears on `/seller/<sellerId>/approvals`. Click **Approve**: PayPal processes the refund, and the outcome and seller debit show on the card. Clicking Approve again changes nothing.
 5. **Pay out.** On Treasury, ask *"How much can I withdraw?"* and then *"Pay it out now."* Approve the schedule. The worker sends the payout (`sender_batch_id` is the idempotency key) and polls until PayPal finishes. The payout shows SUCCESS with PayPal's actual fee, and the `PAYMENT.PAYOUTSBATCH.SUCCESS` webhook is processed.
-6. **Audit.** `/seller/activity` lists every tool call, PayPal call and model run, with inputs, outputs, durations and token usage.
+6. **Audit.** `/seller/<sellerId>/activity` lists every tool call, PayPal call and model run, with inputs, outputs, durations and token usage.
 
 ## Live evaluation
 

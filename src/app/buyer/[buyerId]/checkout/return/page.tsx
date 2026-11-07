@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { buyerPath } from "@/lib/routes";
 import { AppError } from "@/server/errors";
 import { buyerPage } from "@/server/page-auth";
 import { captureCheckout } from "@/server/services/checkout";
@@ -9,8 +10,9 @@ export const metadata = { title: "Payment" };
  * Redirect checkout: PayPal sends the buyer back here with ?token=<PayPal
  * order id> after approval. Capture is idempotent, so a refresh is harmless.
  */
-export default async function CheckoutReturnPage({ searchParams }: { searchParams: Promise<{ token?: string }> }) {
-  const buyer = await buyerPage();
+export default async function CheckoutReturnPage({ params, searchParams }: { params: Promise<{ buyerId: string }>; searchParams: Promise<{ token?: string }> }) {
+  // Capturing a payment is a side effect: refuse a URL that names someone else before doing anything.
+  const buyer = await buyerPage((await params).buyerId);
   const { token } = await searchParams;
   if (!token) return <p className="text-red-700">Missing PayPal order token.</p>;
 
@@ -32,10 +34,10 @@ export default async function CheckoutReturnPage({ searchParams }: { searchParam
       <h1 className="text-xl font-semibold">Checkout</h1>
       <p className={`rounded p-3 ${style}`}>{outcome.text}</p>
       <div className="flex gap-4 text-sm">
-        <Link className="text-blue-700 underline" href="/orders">
+        <Link className="text-blue-700 underline" href={buyerPath(buyer.buyerId, "orders")}>
           Your orders
         </Link>
-        <Link className="text-blue-700 underline" href="/cart">
+        <Link className="text-blue-700 underline" href={buyerPath(buyer.buyerId, "cart")}>
           Cart
         </Link>
       </div>

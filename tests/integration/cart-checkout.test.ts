@@ -73,10 +73,12 @@ describe("checkout", () => {
     const res = await startCheckout(w.buyer.id, carts[0]!.cart_id, buyerAudit(w.buyer.id), { paypal: pp.api });
     expect(res).toMatchObject({ reused: false, total: { amount_minor: 9998 } });
     expect(res.approve_url).toContain("checkoutnow");
-    const input = pp.calls[0]!.args[1] as { invoiceId: string; orderId: string; totalMinor: number; returnUrl: string };
+    const input = pp.calls[0]!.args[1] as { invoiceId: string; orderId: string; totalMinor: number; returnUrl: string; cancelUrl: string };
     expect(input.invoiceId.startsWith(`${carts[0]!.cart_id}-`)).toBe(true);
     expect(input.totalMinor).toBe(9998);
     expect(input.returnUrl).toContain("/checkout/return");
+    expect(input.returnUrl).toContain(`/buyer/${w.buyer.id}/checkout/return`);
+    expect(input.cancelUrl).toContain(`/buyer/${w.buyer.id}/cart`);
     const order = await prisma.order.findUniqueOrThrow({ where: { id: carts[0]!.cart_id }, include: { payments: true } });
     expect(order.status).toBe("PENDING_PAYMENT");
     expect(order.payments[0]).toMatchObject({ status: "CREATED", gross_minor: 9998, seller_id: w.seller.id });

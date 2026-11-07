@@ -10,6 +10,7 @@ import { Grid } from "@/components/grid/Grid";
 import { countryCol, dateCol, marketCol, moneyCol, productCol, statusCol, threadCol } from "@/components/grid/columns";
 import { IconCheck, IconMessages, IconPulse } from "@/components/icons";
 import { useI18n } from "@/components/i18n/I18nProvider";
+import { useBase } from "@/lib/use-base";
 import { DASHBOARD_PERIODS, type DashboardPeriod } from "@/lib/periods";
 import type { MessageKey } from "@/lib/i18n/messages";
 import { StatusStamp } from "@/components/ui";
@@ -50,6 +51,7 @@ const actionLink = "inline-flex min-h-10 items-center rounded-md border border-r
 
 export function OperationsView({ period }: { period: DashboardPeriod }) {
   const { t, locale } = useI18n();
+  const base = useBase();
   const [rows, setRows] = useState<{ key: string; data: Row[] } | null>(null);
   const [summary, setSummary] = useState<{ key: string; data: Summary } | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -87,7 +89,7 @@ export function OperationsView({ period }: { period: DashboardPeriod }) {
       moneyCol<Row>("refunded", t("col.refunded"), { tone: "fee" }),
       moneyCol<Row>("refundable", t("col.stillRefundable"), { width: 150 }),
       moneyCol<Row>("net", t("col.reachedYou"), { tone: "net" }),
-      threadCol<Row>("conversation_id", (id) => `/seller/messages?c=${id}`, t),
+      threadCol<Row>("conversation_id", (id) => `${base}/messages?c=${id}`, t),
       {
         colId: "refund",
         headerName: "",
@@ -102,7 +104,7 @@ export function OperationsView({ period }: { period: DashboardPeriod }) {
           ) : null,
       },
     ],
-    [t, locale],
+    [t, locale, base],
   );
 
   const refresh = useCallback(() => setTick((t) => t + 1), []);
@@ -121,7 +123,7 @@ export function OperationsView({ period }: { period: DashboardPeriod }) {
           {DASHBOARD_PERIODS.map((p) => (
             <Link
               key={p.key}
-              href={`/seller/operations?period=${p.key}`}
+              href={`${base}/operations?period=${p.key}`}
               scroll={false}
               aria-current={p.key === period ? "true" : undefined}
               className={`inline-flex min-h-10 items-center rounded-[5px] px-3 text-sm ${p.key === period ? "bg-ink font-semibold text-sheet" : "text-ink-2 hover:bg-sheet-2 hover:text-ink"}`}
@@ -160,7 +162,7 @@ export function OperationsView({ period }: { period: DashboardPeriod }) {
                     .map((t) => `${t.buyer}: ${t.subject.toLowerCase()}`)
                     .join("; ")}
                   action={
-                    <Link href="/seller/messages" className={actionLink}>
+                    <Link href={`${base}/messages`} className={actionLink}>
                       {t("ops.reply")}
                     </Link>
                   }
@@ -173,7 +175,7 @@ export function OperationsView({ period }: { period: DashboardPeriod }) {
                   title={s.pending_approvals === 1 ? t("ops.approvalsOne") : t("ops.approvals", { n: s.pending_approvals })}
                   body={t("ops.approvalsBody")}
                   action={
-                    <Link href="/seller/approvals" className={actionLink}>
+                    <Link href={`${base}/approvals`} className={actionLink}>
                       {t("ops.review")}
                     </Link>
                   }

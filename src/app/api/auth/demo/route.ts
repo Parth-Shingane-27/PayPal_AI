@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import { buyerPath, sellerPath } from "@/lib/routes";
 import { cookieOptions, SESSION_COOKIE, signSession } from "@/server/auth";
 import { demoLoginEnabled } from "@/server/config";
 import { prisma } from "@/server/db";
@@ -14,7 +15,7 @@ export const POST = handler(async (req) => {
   const { role, id } = await readBody(req, bodySchema);
   const exists = role === "SELLER" ? await prisma.seller.findUnique({ where: { id } }) : await prisma.buyer.findUnique({ where: { id } });
   if (!exists) throw new AppError("NOT_FOUND", "Account not found.");
-  const res = NextResponse.json({ ok: true, role, redirect: role === "SELLER" ? "/seller" : "/buyer" });
+  const res = NextResponse.json({ ok: true, role, redirect: role === "SELLER" ? sellerPath(id) : buyerPath(id) });
   res.cookies.set(SESSION_COOKIE, signSession({ role, id, market: null }), cookieOptions());
   return res;
 });

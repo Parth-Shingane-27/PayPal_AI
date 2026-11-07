@@ -8,6 +8,7 @@ import { useI18n } from "@/components/i18n/I18nProvider";
 import { RefundForm } from "@/components/RefundForm";
 import { FeeBar, MarketStamp, Money, ProductThumb, StatusStamp } from "@/components/ui";
 import { formatDate } from "@/lib/format";
+import { useBase } from "@/lib/use-base";
 
 type Details = {
   order_id: string;
@@ -57,6 +58,7 @@ function Line({ label, value, tone, estimate }: { label: string; value: MoneyT |
 /** Side panel with the money trail for one order. Esc or the close button returns focus to the grid. */
 export function OrderDrawer({ row, onClose, onChanged }: { row: DrawerOrder | null; onClose: () => void; onChanged?: () => void }) {
   const { t, locale } = useI18n();
+  const base = useBase();
   const [reload, setReload] = useState(0);
   const [result, setResult] = useState<{ id: string; details?: Details; error?: string } | null>(null);
   const current = row && result?.id === row.order_id ? result : null;
@@ -204,7 +206,7 @@ export function OrderDrawer({ row, onClose, onChanged }: { row: DrawerOrder | nu
 
           {row.conversation_id && (
             <Link
-              href={`/seller/messages?c=${row.conversation_id}`}
+              href={`${base}/messages?c=${row.conversation_id}`}
               className="inline-flex min-h-11 items-center justify-center gap-2 rounded-md border border-rule-strong px-4 font-medium text-ink hover:border-accent hover:text-accent"
             >
               <IconMessages />

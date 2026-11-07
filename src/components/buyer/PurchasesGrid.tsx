@@ -4,6 +4,7 @@ import type { ColDef } from "ag-grid-community";
 import { useEffect, useMemo, useState } from "react";
 import { api, type Money as MoneyT } from "../api";
 import { useI18n } from "../i18n/I18nProvider";
+import { useBase } from "@/lib/use-base";
 import { Grid } from "../grid/Grid";
 import { bpsCol, countryCol, dateCol, marketCol, moneyCol, productCol, statusCol, threadCol } from "../grid/columns";
 
@@ -29,6 +30,7 @@ export type PurchaseRow = {
 /** Every purchase, with how much of the price reached the maker after fees. */
 export function PurchasesGrid({ pageSize = 20 }: { pageSize?: number }) {
   const { t, locale } = useI18n();
+  const base = useBase();
   const [rows, setRows] = useState<PurchaseRow[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
@@ -51,9 +53,9 @@ export function PurchasesGrid({ pageSize = 20 }: { pageSize?: number }) {
       moneyCol<PurchaseRow>("fees", t("col.feesConversion"), { tone: "muted", width: 170 }),
       moneyCol<PurchaseRow>("reached_maker", t("col.reachedMaker"), { tone: "net", width: 170 }),
       bpsCol<PurchaseRow>("reached_maker_bps", t("col.shareToMaker"), { digits: 0, width: 130 }),
-      threadCol<PurchaseRow>("conversation_id", (id) => `/buyer/messages?c=${id}`, t),
+      threadCol<PurchaseRow>("conversation_id", (id) => `${base}/messages?c=${id}`, t),
     ],
-    [t, locale],
+    [t, locale, base],
   );
 
   return (

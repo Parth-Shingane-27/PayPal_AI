@@ -7,6 +7,7 @@ import { api, type Money as MoneyT } from "@/components/api";
 import { Grid } from "@/components/grid/Grid";
 import { bpsCol, countCol, countryCol, dateCol, feeBarCol, marketCol, moneyCol, productCol, sparkCol, statusCol, threadCol } from "@/components/grid/columns";
 import { useI18n } from "@/components/i18n/I18nProvider";
+import { useBase } from "@/lib/use-base";
 import { DASHBOARD_PERIODS, type DashboardPeriod } from "@/lib/periods";
 import type { MessageKey } from "@/lib/i18n/messages";
 import { MarketStamp } from "@/components/ui";
@@ -123,6 +124,7 @@ function Legend() {
 
 export function LedgerView({ period, tab }: { period: DashboardPeriod; tab: LedgerTab }) {
   const { t, locale } = useI18n();
+  const base = useBase();
   type Loaded = { key: string; sales?: SaleRow[]; products?: ProductRow[]; buyers?: BuyerRow[]; markets?: MarketRow[]; error?: string };
   const [loaded, setLoaded] = useState<Loaded | null>(null);
   const [openOrder, setOpenOrder] = useState<SaleRow | null>(null);
@@ -184,9 +186,9 @@ export function LedgerView({ period, tab }: { period: DashboardPeriod; tab: Ledg
             },
         t,
       ),
-      threadCol<SaleRow>("conversation_id", (id) => `/seller/messages?c=${id}`, t),
+      threadCol<SaleRow>("conversation_id", (id) => `${base}/messages?c=${id}`, t),
     ],
-    [t, locale],
+    [t, locale, base],
   );
 
   const productCols = useMemo<ColDef<ProductRow>[]>(
@@ -263,7 +265,7 @@ export function LedgerView({ period, tab }: { period: DashboardPeriod; tab: Ledg
         cellRenderer: (p: { data?: BuyerRow }) =>
           p.data ? (
             p.data.unread > 0 ? (
-              <Link href="/seller/messages" className="font-semibold text-alert-ink hover:underline">
+              <Link href={`${base}/messages`} className="font-semibold text-alert-ink hover:underline">
                 {t("cell.waiting", { n: p.data.unread })}
               </Link>
             ) : (
@@ -272,7 +274,7 @@ export function LedgerView({ period, tab }: { period: DashboardPeriod; tab: Ledg
           ) : null,
       },
     ],
-    [t, locale],
+    [t, locale, base],
   );
 
   const marketCols = useMemo<ColDef<MarketRow>[]>(
@@ -326,7 +328,7 @@ export function LedgerView({ period, tab }: { period: DashboardPeriod; tab: Ledg
           {DASHBOARD_PERIODS.map((p) => (
             <Link
               key={p.key}
-              href={`/seller/ledger?tab=${tab}&period=${p.key}`}
+              href={`${base}/ledger?tab=${tab}&period=${p.key}`}
               scroll={false}
               aria-current={p.key === period ? "true" : undefined}
               className={`inline-flex min-h-10 items-center rounded-[5px] px-3 text-sm ${p.key === period ? "bg-ink font-semibold text-sheet" : "text-ink-2 hover:bg-sheet-2"}`}
@@ -341,7 +343,7 @@ export function LedgerView({ period, tab }: { period: DashboardPeriod; tab: Ledg
         {TABS.map((tb) => (
           <Link
             key={tb}
-            href={`/seller/ledger?tab=${tb}&period=${period}`}
+            href={`${base}/ledger?tab=${tb}&period=${period}`}
             scroll={false}
             aria-current={tb === tab ? "page" : undefined}
             className={`inline-flex min-h-11 shrink-0 items-center border-b-2 px-4 text-[0.95rem] ${tb === tab ? "border-accent font-semibold text-ink" : "border-transparent text-ink-3 hover:text-ink"}`}

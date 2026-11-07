@@ -8,6 +8,7 @@ import { IconClose, IconSearch } from "@/components/icons";
 import type { MessageKey } from "@/lib/i18n/messages";
 import { ProductThumb, Sparkline } from "@/components/ui";
 import { formatCount } from "@/lib/format";
+import { useBase } from "@/lib/use-base";
 
 type Product = {
   id: string;
@@ -65,6 +66,7 @@ function Coverage({ listings }: { listings: Product["listings"] }) {
 
 function ProductCard({ p, perf }: { p: Product; perf?: Perf }) {
   const { t } = useI18n();
+  const base = useBase();
   const published = p.listings.filter((l) => l.status === "PUBLISHED").length;
   const drafts = p.listings.filter((l) => l.status === "DRAFT").length;
   const missing = MARKETS.length - p.listings.length;
@@ -78,7 +80,7 @@ function ProductCard({ p, perf }: { p: Product; perf?: Perf }) {
         </span>
         <div className="min-w-0 flex-1">
           <h2 className="font-display text-lg leading-snug font-semibold">
-            <Link href={`/seller/products/${p.id}`} className="after:absolute after:inset-0 hover:text-accent">
+            <Link href={`${base}/products/${p.id}`} className="after:absolute after:inset-0 hover:text-accent">
               {p.title}
             </Link>
           </h2>
@@ -339,7 +341,7 @@ export function ProductsView() {
           </label>
           <label className="flex items-center gap-2 text-sm text-ink-2">
             {t("prod.sort")}
-            <select value={sort} onChange={(e) => setSort(e.target.value as Sort)} className="min-h-11 rounded-md border border-rule bg-sheet px-3 text-ink">
+            <select value={sort} onChange={(e) => setSort(e.target.value as Sort)} className="min-h-11 rounded-md border border-rule bg-sheet pl-3 text-ink">
               {SORTS.map((k) => (
                 <option key={k} value={k}>
                   {t(`sort.${k}` as MessageKey)}

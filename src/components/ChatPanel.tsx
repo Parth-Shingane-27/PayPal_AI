@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useBase } from "@/lib/use-base";
 import { api, type Money } from "./api";
 import { type CaptureOutcome, PayPalButtons } from "./PayPalButtons";
 
@@ -116,6 +117,7 @@ export function ChatPanel(props: {
   /** Extra scope for remembering the open conversation (e.g. the buyer's market). */
   resumeKey?: string;
 }) {
+  const base = useBase();
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [entries, setEntries] = useState<Entry[]>([]);
   const [steps, setSteps] = useState<Step[]>([]);
@@ -266,7 +268,7 @@ export function ChatPanel(props: {
                 {t?.pendingApprovals.map((a) => (
                   <div key={a.approval_id} className="rounded border border-amber-300 bg-amber-50 p-2 text-sm">
                     Waiting for your approval{a.amount ? `: ${a.amount.display}` : a.total_including_fees ? `: ${a.total_including_fees.display}` : ""}.{" "}
-                    <Link className="text-blue-700 underline" href="/seller/approvals">
+                    <Link className="text-blue-700 underline" href={`${base}/approvals`}>
                       Review on the Approvals page
                     </Link>
                   </div>

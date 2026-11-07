@@ -5,6 +5,7 @@ import { useId, useState } from "react";
 import { api, type Money } from "@/components/api";
 import { IconMessages } from "@/components/icons";
 import { useI18n } from "@/components/i18n/I18nProvider";
+import { useBase } from "@/lib/use-base";
 import { CountryStamp } from "@/components/ui";
 
 export type ShopListing = {
@@ -68,6 +69,7 @@ function AskMaker({ listing, onDone }: { listing: ShopListing; onDone: (threadId
 /** Everything for sale in the buyer's market, with one-click "Add to cart" and a direct line to the maker. */
 export function ProductList({ listings }: { listings: ShopListing[] }) {
   const { t } = useI18n();
+  const base = useBase();
   const [busy, setBusy] = useState<string | null>(null);
   const [added, setAdded] = useState<Record<string, number>>({});
   const [asking, setAsking] = useState<string | null>(null);
@@ -99,7 +101,7 @@ export function ProductList({ listings }: { listings: ShopListing[] }) {
           </h1>
           <p className="text-ink-3">{t("shop.summary", { n: listings.length })}</p>
         </div>
-        <Link href="/cart" className="inline-flex min-h-11 items-center rounded-md border border-rule-strong px-4 text-sm font-medium hover:border-accent hover:text-accent">
+        <Link href={`${base}/cart`} className="inline-flex min-h-11 items-center rounded-md border border-rule-strong px-4 text-sm font-medium hover:border-accent hover:text-accent">
           {t("shop.goCart")}
         </Link>
       </div>
@@ -159,7 +161,7 @@ export function ProductList({ listings }: { listings: ShopListing[] }) {
                 {sent[l.listing_id] ? (
                   <p className="mt-3 text-sm text-positive-ink" role="status">
                     {t("shop.sent")}{" "}
-                    <Link href={`/buyer/messages?c=${sent[l.listing_id]}`} className="font-medium text-accent underline">
+                    <Link href={`${base}/messages?c=${sent[l.listing_id]}`} className="font-medium text-accent underline">
                       {t("shop.openConv")}
                     </Link>
                   </p>

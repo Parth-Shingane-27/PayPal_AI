@@ -5,6 +5,7 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { formatAge, formatDate } from "@/lib/format";
 import type { MessageKey } from "@/lib/i18n/messages";
+import { useBase } from "@/lib/use-base";
 import { api, type Money as MoneyT } from "../api";
 import { useI18n } from "../i18n/I18nProvider";
 import { IconBack, IconSend } from "../icons";
@@ -217,10 +218,11 @@ export function Inbox({ role }: { role: "SELLER" | "BUYER" }) {
 
 function ThreadView({ thread, now, onBack, onSent }: { thread: Thread; now: number | null; onBack: () => void; onSent: (m: Message) => void }) {
   const { t, locale } = useI18n();
+  const base = useBase();
   const other = thread.viewer === "SELLER" ? thread.buyer : thread.seller;
   const me = thread.viewer === "SELLER" ? thread.seller : thread.buyer;
   const endRef = useRef<HTMLDivElement>(null);
-  const productHref = thread.product ? (thread.viewer === "SELLER" ? `/seller/products/${thread.product.id}` : "/shop") : null;
+  const productHref = thread.product ? (thread.viewer === "SELLER" ? `${base}/products/${thread.product.id}` : `${base}/shop`) : null;
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ block: "end" });

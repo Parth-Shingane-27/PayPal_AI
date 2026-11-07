@@ -9,6 +9,7 @@ import { formatBps, formatChange, formatCount, formatDay } from "@/lib/format";
 import { getT, getUiLang } from "@/lib/i18n/server";
 import { localeOf } from "@/lib/i18n/core";
 import type { MessageKey } from "@/lib/i18n/messages";
+import { sellerPath } from "@/lib/routes";
 import { sellerPage } from "@/server/page-auth";
 import { sellerOverview, sellerProductRows } from "@/server/services/analytics";
 import { resolvePeriod } from "@/server/services/ledger";
@@ -52,6 +53,7 @@ function Figure({ label, value, children, href }: { label: string; value: string
 
 export default async function SellerOverview({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
   const seller = await sellerPage();
+  const base = sellerPath(seller.sellerId);
   const t = await getT();
   const uiLocale = localeOf(await getUiLang());
   const periodKey = parseDashboardPeriod((await searchParams).period);
@@ -75,7 +77,7 @@ export default async function SellerOverview({ searchParams }: { searchParams: P
           </p>
           <h1 className="font-display text-[2rem] leading-tight font-bold tracking-[-0.025em] text-ink md:text-[2.4rem]">{t("ov.title", { period: t(`ov.period.${periodKey}` as MessageKey) })}</h1>
         </div>
-        <PeriodPicker current={periodKey} basePath="/seller" />
+        <PeriodPicker current={periodKey} basePath={base} />
       </header>
 
       <dl className="grid gap-px overflow-hidden rounded-[10px] border border-rule bg-rule sm:grid-cols-2 lg:grid-cols-5">
@@ -91,7 +93,7 @@ export default async function SellerOverview({ searchParams }: { searchParams: P
         <Figure label={t("kpi.refunded")} value={formatBps(k.refund_rate_bps)}>
           {k.failed_payments > 0 ? <span className="text-xs text-ink-3">{k.failed_payments === 1 ? t("kpi.declinedOne") : t("kpi.declined", { n: k.failed_payments })}</span> : <span className="text-xs text-ink-3">{t("kpi.noDeclined")}</span>}
         </Figure>
-        <Figure label={t("kpi.ready")} value={k.available.display} href="/seller/treasury">
+        <Figure label={t("kpi.ready")} value={k.available.display} href={`${base}/treasury`}>
           <span className="text-xs text-accent">{t("kpi.openTreasury")}</span>
         </Figure>
       </dl>
@@ -109,7 +111,7 @@ export default async function SellerOverview({ searchParams }: { searchParams: P
             markets={o.markets}
             currency={o.seller.home_currency}
             locale={o.seller.locale}
-            href={`/seller/ledger?tab=markets&period=${periodKey}`}
+            href={`${base}/ledger?tab=markets&period=${periodKey}`}
             title={t("markets.chart")}
           />
         </Panel>
@@ -117,13 +119,13 @@ export default async function SellerOverview({ searchParams }: { searchParams: P
 
       <div className="grid gap-6 lg:grid-cols-2">
         <Panel labelledBy="top-products">
-          <SectionHeading id="top-products" title={t("best.title")} aside={<Link href="/seller/ledger?tab=products" className="text-accent hover:underline">{t("best.all")}</Link>} />
+          <SectionHeading id="top-products" title={t("best.title")} aside={<Link href={`${base}/ledger?tab=products`} className="text-accent hover:underline">{t("best.all")}</Link>} />
           <ul className="divide-y divide-rule">
             {topProducts.map((p) => (
               <li key={p.product_id} className="flex items-center gap-3 py-2.5">
                 <ProductThumb src={p.image_url} alt="" size={40} />
                 <div className="min-w-0 flex-1">
-                  <Link href={`/seller/products/${p.product_id}`} className="block truncate font-medium text-ink hover:text-accent">
+                  <Link href={`${base}/products/${p.product_id}`} className="block truncate font-medium text-ink hover:text-accent">
                     {p.title}
                   </Link>
                   <p className="text-xs text-ink-3">
@@ -142,7 +144,7 @@ export default async function SellerOverview({ searchParams }: { searchParams: P
           <SectionHeading
             id="inbox-title"
             title={waiting.length === 0 ? t("inbox.recent") : waiting.length === 1 ? t("inbox.waitingOne") : t("inbox.waiting", { n: waiting.length })}
-            aside={<Link href="/seller/messages" className="text-accent hover:underline">{t("inbox.openMessages")}</Link>}
+            aside={<Link href={`${base}/messages`} className="text-accent hover:underline">{t("inbox.openMessages")}</Link>}
           />
           {recentThreads.length === 0 ? (
             <p className="text-sm text-ink-3">{t("inbox.none")}</p>
@@ -150,7 +152,7 @@ export default async function SellerOverview({ searchParams }: { searchParams: P
             <ul className="divide-y divide-rule">
               {recentThreads.map((th) => (
                 <li key={th.id}>
-                  <Link href={`/seller/messages?c=${th.id}`} className="flex gap-3 py-2.5 hover:bg-sheet-2">
+                  <Link href={`${base}/messages?c=${th.id}`} className="flex gap-3 py-2.5 hover:bg-sheet-2">
                     <span className={`mt-2 h-2 w-2 shrink-0 rounded-full ${th.unread > 0 ? "bg-alert" : "bg-transparent"}`} aria-hidden />
                     <span className="min-w-0 flex-1">
                       <span className="flex items-baseline justify-between gap-2">

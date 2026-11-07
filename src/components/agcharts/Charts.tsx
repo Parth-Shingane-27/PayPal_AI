@@ -123,7 +123,9 @@ export function MarketRegionChart({ markets, currency, locale, href, title }: { 
   const mode = useTheme();
   const fmt = useMemo(() => moneyFormatter(currency, locale), [currency, locale]);
   const options = useMemo<AgChartOptions>(() => {
-    const css = getComputedStyle(document.documentElement);
+    // The chart itself only draws in the browser; this guard just keeps server rendering from touching `document`.
+    const css = typeof document === "undefined" ? null : getComputedStyle(document.documentElement);
+    const token = (name: string) => css?.getPropertyValue(name).trim() ?? "";
     const data: Record<string, string | number>[] = markets.slice(0, 8).map((m) => ({
       label: `${m.country} ${t(`langname.${m.market.slice(0, 2)}` as MessageKey)}`.trim(),
       market: m.market,
@@ -140,13 +142,13 @@ export function MarketRegionChart({ markets, currency, locale, href, title }: { 
         yKey: r,
         yName: t(`region.${r}` as MessageKey),
         stacked: true,
-        fill: css.getPropertyValue(REGION_SLOT[r]).trim(),
-        stroke: css.getPropertyValue(REGION_SLOT[r]).trim(),
+        fill: token(REGION_SLOT[r]),
+        stroke: token(REGION_SLOT[r]),
         label: {
           enabled: true,
           placement: "outside-end",
           formatter: (p: { value: number }) => (p.value > 0 ? fmt.whole(p.value) : ""),
-          color: css.getPropertyValue("--ink-2").trim(),
+          color: token("--ink-2"),
           fontSize: 12,
         },
         tooltip: {

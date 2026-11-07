@@ -252,3 +252,20 @@ table,
 .ag-row:has(.cell-overflow:hover) {
   z-index: 5;
 }
+
+/* Dropdowns: custom chevron with room around it instead of the browser's cramped arrow. */
+select:not(.ag-root-wrapper select) {
+  appearance: none;
+  -webkit-appearance: none;
+  padding-right: 2.5rem;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='none' stroke='%235e5450' stroke-width='1.75' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m5 7.5 5 5 5-5'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 0.8rem center;
+  background-size: 1rem 1rem;
+}
+:root[data-theme="dark"] select:not(.ag-root-wrapper select) {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='none' stroke='%23a6988f' stroke-width='1.75' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m5 7.5 5 5 5-5'/%3E%3C/svg%3E");
+}
+select:not(.ag-root-wrapper select):hover {
+  border-color: var(--rule-strong);
+}
