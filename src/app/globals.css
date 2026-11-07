@@ -30,6 +30,12 @@
   --positive-soft: #f3e6c4;
   --positive-ink: #5e440a;
   --focus: #7d5d10;
+  /* AI assistant: indigo, the complement of gold leaf, so the launcher stands
+     out against the warm page and product art. Used for the assistant only. */
+  --assist: #3b3fd8;
+  --assist-on: #ffffff;
+  --assist-soft: #e3e4ff;
+  --assist-ink: #2a2da6;
   --shadow-overlay: 0 18px 50px -12px rgb(94 68 10 / 0.22);
   /* Chart categorical slots, fixed order (validated: dataviz validate_palette, light + dark).
      Deliberately no gold: gold is the interface colour, never a data colour. */
@@ -64,6 +70,10 @@
   --positive-soft: #3a2f15;
   --positive-ink: #f2d98f;
   --focus: #e6c25a;
+  --assist: #9da3ff;
+  --assist-on: #141010;
+  --assist-soft: #262a5c;
+  --assist-ink: #c9ccff;
   --shadow-overlay: 0 18px 50px -12px rgb(0 0 0 / 0.65);
   --series-1: #3987e5;
   --series-2: #d95926;
@@ -88,6 +98,10 @@
   --color-accent: var(--accent);
   --color-accent-soft: var(--accent-soft);
   --color-accent-ink: var(--accent-ink);
+  --color-assist: var(--assist);
+  --color-assist-on: var(--assist-on);
+  --color-assist-soft: var(--assist-soft);
+  --color-assist-ink: var(--assist-ink);
   --color-alert: var(--alert);
   --color-alert-soft: var(--alert-soft);
   --color-alert-ink: var(--alert-ink);

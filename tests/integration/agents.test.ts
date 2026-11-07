@@ -33,7 +33,7 @@ describe("agent definitions", () => {
   it("give every agent the tools the design calls for", () => {
     const names = Object.fromEntries(Object.values(AGENTS).map((a) => [a.name, a.tools.map((t) => t.name)]));
     expect(names).toEqual({
-      LISTING: ["get_product", "list_markets", "get_fx_rate", "suggest_price", "save_listing_draft", "handoff"],
+      LISTING: ["get_product", "preview_product", "create_product", "list_markets", "get_fx_rate", "suggest_price", "save_listing_draft", "handoff"],
       SHOPPING: ["search_products", "compare_products", "add_to_cart", "update_cart", "view_cart", "create_paypal_order"],
       TREASURY: ["get_balances", "estimate_fees", "forecast_earnings", "compare_selling_direct", "propose_payout_schedule", "handoff"],
       OPERATIONS: ["query_orders", "get_order_details", "get_payment_status", "earnings_by_market", "detect_anomalies", "propose_refund", "handoff"],
@@ -174,6 +174,75 @@ describe("Listing Agent flow", () => {
       expect([...l.seo_title].length).toBeLessThanOrEqual(70);
     }
     expect(contextOf(s.requests[0]!)).toContain(`editor of product ${product.id}`);
+  });
+
+  it("previews a described product, creates it only after the seller replies, then drafts a listing", async () => {
+    vi.spyOn(frankfurter, "getRate").mockImplementation(async (from, to) => ({ from, to, rate: from === to ? 1 : 1.1, date: "2026-11-04", source: "ECB via Frankfurter" }));
+    const seller = await makeSeller();
+    const owner = { type: "SELLER" as const, sellerId: seller.id };
+    const mug = {
+      title: "Hand-thrown stoneware mug",
+      description: "A 12 oz stoneware mug, thrown on the wheel.",
+      written_in: null,
+      cost: "18",
+      shipping: "9",
+      cost_currency: "EUR",
+      margin_percent: "40",
+      sku: null,
+      material: "Stoneware",
+      size: "12 oz",
+    };
+    let previewId = "";
+    const s = scriptedModel([
+      reply([call("p", "preview_product", mug)]),
+      (params) => {
+        const preview = lastResults(params)[0]!;
+        expect(preview.json).toMatchObject({ summary: { sku: "HAND-THROWN-STONEWARE-MUG", sku_generated: true, margin_percent: 40, material: "Stoneware" } });
+        previewId = String(preview.json.preview_id);
+        // Creating in the same reply as the preview is refused: the seller has not seen it yet.
+        return reply([call("c0", "create_product", { preview_id: previewId })]);
+      },
+      (params) => {
+        expect(lastResults(params)[0]).toMatchObject({ is_error: true });
+        return reply([text("Here is the summary. Shall I create it?")]);
+      },
+      // Next message: the seller confirmed.
+      () => reply([call("c1", "create_product", { preview_id: previewId })]),
+      (params) => {
+        const created = lastResults(params)[0]!;
+        expect(created.is_error).toBe(false);
+        return reply([call("q", "suggest_price", { product_id: created.json.product_id, market: "en-US", competitor_low: null, competitor_high: null, target_price: null })]);
+      },
+      (params) =>
+        reply([call("d", "save_listing_draft", { quote_id: lastResults(params)[0]!.json.quote_id, title: "Stoneware mug", description: "12 oz mug.", seo_title: "Hand-thrown 12 oz stoneware mug" })]),
+      reply([text("| Market | Price | Profit | Margin | Check |")]),
+    ]);
+
+    const first = await sendMessage({ owner, agent: "LISTING", text: "New product: 12 oz stoneware mug, costs me 18 EUR + 9 EUR shipping, 40% margin.", deps: deps(s.model) });
+    expect(await prisma.product.count()).toBe(0);
+    await sendMessage({ owner, sessionId: first.sessionId, text: "Yes, create it and list it in the US.", deps: deps(s.model) });
+
+    const product = await prisma.product.findFirstOrThrow({ where: { seller_id: seller.id }, include: { listings: true } });
+    expect(product).toMatchObject({ sku: "HAND-THROWN-STONEWARE-MUG", cost_minor: 1800, shipping_minor: 900, cost_currency: "EUR", margin_bps: 4000, attributes: { material: "Stoneware", size: "12 oz" } });
+    expect(product.listings.map((l) => [l.locale, l.status])).toEqual([["en-US", "DRAFT"]]);
+  });
+
+  it("refuses to create a product from another conversation's preview", async () => {
+    const seller = await makeSeller();
+    const owner = { type: "SELLER" as const, sellerId: seller.id };
+    const other = await sendMessage({ owner, agent: "LISTING", text: "hi", deps: deps(scriptedModel([reply([text("hi")])]).model) });
+    const preview = await prisma.agentAction.create({
+      data: { kind: "TOOL", tool: "preview_product", input: {}, output: { form: {} }, status: "SUCCEEDED", actor: "SELLER", seller_id: seller.id, session_id: other.sessionId },
+    });
+    const s = scriptedModel([
+      reply([call("c", "create_product", { preview_id: preview.id })]),
+      (params) => {
+        expect(lastResults(params)[0]!.json).toMatchObject({ code: "NOT_FOUND" });
+        return reply([text("I need to preview it first.")]);
+      },
+    ]);
+    await sendMessage({ owner, agent: "LISTING", text: "create it", deps: deps(s.model) });
+    expect(await prisma.product.count()).toBe(0);
   });
 
   it("rejects a quote from another seller", async () => {

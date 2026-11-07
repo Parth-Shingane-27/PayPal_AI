@@ -4,7 +4,9 @@ import Link from "next/link";
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { api, type Money } from "@/components/api";
 import { useI18n } from "@/components/i18n/I18nProvider";
-import { IconClose, IconSearch } from "@/components/icons";
+import { AskAi, openAskAi } from "@/components/AskAi";
+import { ChatPanel } from "@/components/ChatPanel";
+import { IconClose, IconSearch, IconSpark } from "@/components/icons";
 import type { MessageKey } from "@/lib/i18n/messages";
 import { ProductThumb, Sparkline } from "@/components/ui";
 import { formatCount } from "@/lib/format";
@@ -126,7 +128,7 @@ function ProductCard({ p, perf }: { p: Product; perf?: Perf }) {
   );
 }
 
-function NewProductDrawer({ onClose, onCreated }: { onClose: () => void; onCreated: () => void }) {
+function NewProductDrawer({ onClose, onCreated, onAskAi }: { onClose: () => void; onCreated: () => void; onAskAi: () => void }) {
   const { t } = useI18n();
   const [form, setForm] = useState({ sku: "", title: "", description: "", source_locale: "en-US", cost: "", shipping: "", currency: "USD", margin: "30", material: "", size: "" });
   const [error, setError] = useState<string | null>(null);
@@ -186,6 +188,17 @@ function NewProductDrawer({ onClose, onCreated }: { onClose: () => void; onCreat
           </button>
         </header>
         <div className="flex flex-col gap-4 p-5">
+          <button
+            type="button"
+            onClick={onAskAi}
+            className="flex items-center gap-3 rounded-md border border-assist/40 bg-assist-soft p-3 text-left text-sm text-assist-ink hover:border-assist"
+          >
+            <IconSpark />
+            <span>
+              <span className="block font-semibold">Rather just describe it?</span>
+              The AI assistant fills this in from your own words, then prices it for each market.
+            </span>
+          </button>
           <p className="text-sm text-ink-3">{t("form.intro")}</p>
           <label className={label}>
             {t("form.name")}
@@ -318,9 +331,18 @@ export function ProductsView() {
               : t("prod.loading")}
           </p>
         </div>
-        <button type="button" onClick={() => setAdding(true)} className="min-h-11 rounded-md bg-accent px-5 font-semibold text-sheet hover:opacity-90">
-          {t("prod.add")}
-        </button>
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={openAskAi}
+            className="inline-flex min-h-11 items-center gap-2 rounded-md bg-assist px-5 font-semibold text-assist-on hover:brightness-110"
+          >
+            <IconSpark /> Add with AI
+          </button>
+          <button type="button" onClick={() => setAdding(true)} className="min-h-11 rounded-md border border-rule-strong px-5 font-semibold text-ink hover:bg-sheet-2">
+            {t("prod.add")}
+          </button>
+        </div>
       </header>
 
       <div className="flex flex-col gap-3">
@@ -405,12 +427,29 @@ export function ProductsView() {
       {adding && (
         <NewProductDrawer
           onClose={() => setAdding(false)}
+          onAskAi={() => {
+            setAdding(false);
+            openAskAi();
+          }}
           onCreated={() => {
             setAdding(false);
             setTick((t) => t + 1);
           }}
         />
       )}
+
+      <AskAi
+        label="Add a product with AI"
+        hint="Describe it in your own words: what it is, what it costs you and shipping. The assistant creates it, then prices and drafts listings for the markets you pick."
+      >
+        <ChatPanel
+          title="Listing Agent"
+          agent="LISTING"
+          resumeKey="new-product"
+          placeholder='Try: "I make hand-thrown stoneware mugs, 12 oz. Each costs me 18 EUR plus 9 EUR shipping. I want about 40% margin."'
+          onResult={() => setTick((t) => t + 1)}
+        />
+      </AskAi>
     </div>
   );
 }
