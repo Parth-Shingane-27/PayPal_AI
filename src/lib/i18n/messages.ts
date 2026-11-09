@@ -429,7 +429,7 @@ const en = {
   "shop.openConv": "Open the conversation",
   "shop.rating": "{r} of 5",
   "shop.ratings": "{n} ratings",
-  "shop.assistant": "Ask the shopping assistant",
+  "shop.assistant": "Ask the shopping agent",
   "shop.assistantHint": "Describe what you want in any language. Prices are in {currency} and include shipping.",
   "shop.addFailed": "Could not add to the cart.",
 

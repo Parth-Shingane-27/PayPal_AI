@@ -78,6 +78,26 @@ type RunInput = {
 const REFUSAL_TEXT = "I'm sorry, but I can't help with that request. Is there something about your shop or your order I can help with?";
 const TIMEOUT_TEXT = "This took too long and I stopped. Nothing further was changed; please try again or ask for less at once.";
 
+const OLD_RESULT_CHARS = 240;
+
+/**
+ * What is sent to the model: results of tool calls from earlier turns are cut
+ * short (the assistant's own replies already summarize them), so a long
+ * conversation does not outgrow the model's per-request token limit. The saved
+ * history is never changed.
+ */
+export function compactHistory(history: ChatMessage[]): ChatMessage[] {
+  let lastUser = -1;
+  history.forEach((m, i) => {
+    if (m.role === "user") lastUser = i;
+  });
+  return history.map((m, i) =>
+    m.role === "tool" && i < lastUser && typeof m.content === "string" && m.content.length > OLD_RESULT_CHARS
+      ? { ...m, content: `${m.content.slice(0, OLD_RESULT_CHARS)}... [older result shortened]` }
+      : m,
+  );
+}
+
 /** Every failed tool result has the same shape. */
 function errorResponse(code: string, message: string, details?: Record<string, unknown>) {
   return { error: { code, message, ...(details ? { details } : {}) } };
@@ -239,7 +259,7 @@ export async function runAgent(input: RunInput): Promise<RunResult> {
         response = await model.chat(
           {
             model: modelId,
-            messages: [{ role: "system", content: spec.system }, ...history],
+            messages: [{ role: "system", content: spec.system }, ...compactHistory(history)],
             tools,
             tool_choice: "auto",
             parallel_tool_calls: true,

@@ -33,7 +33,7 @@ function loadSdk(clientId: string, currency: string): Promise<PayPalNamespace> {
   return p;
 }
 
-export type CaptureOutcome = { order_id: string; order_status: string; payment_status: string; total: { display: string } };
+export type CaptureOutcome = { order_id: string; order_status: string; payment_status: string; total: { display: string }; delivery?: { display: string } };
 
 /**
  * PayPal checkout. createOrder reuses the PayPal order the Shopping Agent

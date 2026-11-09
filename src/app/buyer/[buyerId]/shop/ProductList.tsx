@@ -67,7 +67,7 @@ function AskMaker({ listing, onDone }: { listing: ShopListing; onDone: (threadId
 }
 
 /** Everything for sale in the buyer's market, with one-click "Add to cart" and a direct line to the maker. */
-export function ProductList({ listings }: { listings: ShopListing[] }) {
+export function ProductList({ listings, recommended = null, onShowAll }: { listings: ShopListing[]; recommended?: { outcome: "match" | "options" | "alternatives" | "none"; requested: string; listing_ids: string[] } | null; onShowAll?: () => void }) {
   const { t } = useI18n();
   const base = useBase();
   const [busy, setBusy] = useState<string | null>(null);
@@ -77,7 +77,11 @@ export function ProductList({ listings }: { listings: ShopListing[] }) {
   const [error, setError] = useState<string | null>(null);
   const [category, setCategory] = useState<string>("__all");
   const categories = ["__all", ...Array.from(new Set(listings.map((l) => l.category).filter((c): c is string => Boolean(c)))).sort()];
-  const shown = category === "__all" ? listings : listings.filter((l) => l.category === category);
+  const picks = recommended ? recommended.listing_ids.map((id) => listings.find((l) => l.listing_id === id)).filter((l): l is ShopListing => Boolean(l)) : [];
+  const showingPicks = picks.length > 0;
+  const pickIds = new Set(picks.map((l) => l.listing_id));
+  // Alternatives lead the grid, with the rest of the shop below them.
+  const shown = showingPicks && recommended?.outcome === "alternatives" ? [...picks, ...listings.filter((l) => !pickIds.has(l.listing_id))] : showingPicks ? picks : category === "__all" ? listings : listings.filter((l) => l.category === category);
 
   async function add(listingId: string) {
     setBusy(listingId);
@@ -105,7 +109,20 @@ export function ProductList({ listings }: { listings: ShopListing[] }) {
           {t("shop.goCart")}
         </Link>
       </div>
-      <div className="flex flex-wrap gap-2" role="group" aria-label={t("prod.category")}>
+      {recommended && (
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-assist bg-assist-soft px-4 py-3 text-sm text-assist-ink" role="status">
+          <span>
+            {recommended.outcome === "options" && `Options for "${recommended.requested}": tell the shopping agent the number of the one you want.`}
+            {recommended.outcome === "match" && `Recommended by your shopping agent for "${recommended.requested}"`}
+            {recommended.outcome === "alternatives" && `"${recommended.requested}" isn't available right now. You might like these available products instead:`}
+            {recommended.outcome === "none" && `"${recommended.requested}" isn't available right now. Browse everything we have below.`}
+          </span>
+          <button type="button" onClick={onShowAll} className="font-semibold underline">
+            {showingPicks ? "Show all products" : "Dismiss"}
+          </button>
+        </div>
+      )}
+      <div className={`flex flex-wrap gap-2 ${showingPicks ? "hidden" : ""}`} role="group" aria-label={t("prod.category")}>
         {categories.map((c) => (
           <button
             key={c}
@@ -124,7 +141,7 @@ export function ProductList({ listings }: { listings: ShopListing[] }) {
       ) : (
         <ul className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {shown.map((l) => (
-            <li key={l.listing_id} className="group flex flex-col overflow-hidden rounded-[10px] border border-rule bg-sheet transition-colors hover:border-accent/70">
+            <li key={l.listing_id} className={`group flex flex-col overflow-hidden rounded-[10px] border bg-sheet transition-colors hover:border-accent/70 ${recommended?.outcome === "alternatives" && pickIds.has(l.listing_id) ? "border-assist ring-2 ring-assist/40" : recommended?.outcome === "options" ? "border-assist ring-2 ring-assist/40" : "border-rule"}`}>
               {l.image_url && (
                 <div className="overflow-hidden">
                   {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -132,6 +149,13 @@ export function ProductList({ listings }: { listings: ShopListing[] }) {
                 </div>
               )}
               <div className="flex flex-1 flex-col p-4">
+                {recommended?.outcome === "options" && pickIds.has(l.listing_id) && (
+                  <p className="mb-1 inline-flex items-center gap-2 text-xs font-semibold tracking-wide text-assist-ink uppercase">
+                    <span className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-assist text-sm text-assist-on">{picks.findIndex((x) => x.listing_id === l.listing_id) + 1}</span>
+                    Option {picks.findIndex((x) => x.listing_id === l.listing_id) + 1}
+                  </p>
+                )}
+                {recommended?.outcome === "alternatives" && pickIds.has(l.listing_id) && <p className="mb-1 text-xs font-semibold tracking-wide text-assist-ink uppercase">Recommended for you</p>}
                 <h2 className="font-display text-lg leading-snug font-semibold">{l.title}</h2>
                 <p className="mt-1 flex items-center gap-2 text-sm text-ink-3">
                   <CountryStamp country={l.seller_country} />

@@ -22,7 +22,8 @@ export const AGENTS: Record<AgentName, AgentSpec> = {
     system: SHOPPING_PROMPT,
     tools: SHOPPING_TOOLS,
     maxModelCalls: 15,
-    timeoutMs: 60_000,
+    // Each model call can take 20-30 s with reasoning; a search, a check and the reply need more than a minute.
+    timeoutMs: 2 * 60_000,
   },
   TREASURY: {
     name: "TREASURY",

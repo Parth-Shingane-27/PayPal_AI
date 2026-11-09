@@ -21,6 +21,18 @@ type ChatResult = { sessionId: string; agent: AgentName; routed: { agent: AgentN
 type Step = { id: string; name: string; state: "running" | "ok" | "error" };
 type Product = { listing_id: string; title: string; summary?: string; description?: string; price: Money; seller: string | { name: string } };
 
+type Display = { display: string };
+export type CartView = {
+  cart_id: string;
+  seller: string;
+  currency: string;
+  status: string;
+  items: { listing_id: string; title: string; quantity: number; unit_price: Display; line_total: Display }[];
+  total: Display;
+};
+
+export type ShopDisplay = { outcome: "match" | "options" | "alternatives" | "none"; requested: string; listing_ids: string[] };
+
 type Entry =
   | { kind: "user"; text: string }
   | { kind: "assistant"; text: string; agent?: AgentName; turn?: Turn }
@@ -31,6 +43,7 @@ const AGENT_LABEL: Record<AgentName, string> = { LISTING: "Listing", SHOPPING: "
 /** What each tool does, in plain words, for the progress list while the assistant works. */
 const STEP_LABEL: Record<string, string> = {
   get_product: "Reading the product",
+  get_my_order: "Confirming your payment",
   preview_product: "Checking the product details",
   create_product: "Creating the product",
   list_markets: "Checking the markets",
@@ -38,6 +51,8 @@ const STEP_LABEL: Record<string, string> = {
   suggest_price: "Working out a local price",
   save_listing_draft: "Saving the draft listing",
   search_products: "Searching products",
+  show_in_shop: "Updating the shop page",
+  convert_to_usd: "Converting to US dollars",
   compare_products: "Comparing products",
   add_to_cart: "Adding to your cart",
   update_cart: "Updating your cart",
@@ -118,6 +133,12 @@ export function ChatPanel(props: {
   onResult?: () => void;
   /** Extra scope for remembering the open conversation (e.g. the buyer's market). */
   resumeKey?: string;
+  /** Example questions shown until the first message is sent; clicking one asks it. */
+  suggestions?: string[];
+  /** When set, recommended products are handed to the page (listing ids) instead of shown as cards in the chat. */
+  onProducts?: (shown: ShopDisplay) => void;
+  /** Buyer chats: called with the carts after the agent views or changes the cart, so the page can show them. */
+  onCart?: (carts: CartView[]) => void;
 }) {
   const base = useBase();
   const [sessionId, setSessionId] = useState<string | null>(null);
@@ -129,7 +150,7 @@ export function ChatPanel(props: {
   const [paid, setPaid] = useState<Record<string, CaptureOutcome>>({});
   const bottom = useRef<HTMLDivElement>(null);
   const isBuyer = props.agent === undefined;
-  const { onResult } = props;
+  const { onResult, onProducts, onCart } = props;
   // The open conversation is remembered per chat, so leaving the page and coming back resumes it.
   const storageKey = `globalcart.chat.${isBuyer ? "SHOPPING" : (props.agent ?? "ASSISTANT")}.${props.productId ?? "-"}.${props.resumeKey ?? "-"}`;
 
@@ -166,8 +187,8 @@ export function ChatPanel(props: {
     bottom.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
   }, [entries, steps]);
 
-  async function send() {
-    const text = input.trim();
+  async function send(override?: string) {
+    const text = (override ?? input).trim();
     if (!text || busy) return;
     setInput("");
     setBusy(true);
@@ -194,6 +215,17 @@ export function ChatPanel(props: {
         else if (event === "result") {
           const r = data as ChatResult;
           setEntries((e) => [...e, ...r.turns.map((t): Entry => ({ kind: "assistant", text: t.reply, agent: t.agent, turn: t }))]);
+          if (onProducts) {
+            // show_in_shop is the agent's own decision about what the shop page displays.
+            for (const t of r.turns) {
+              for (const c of t.toolCalls) if (c.name === "show_in_shop" && c.ok && c.output) onProducts(c.output as ShopDisplay);
+            }
+          }
+          if (onCart) {
+            const cartCalls = r.turns.flatMap((t) => t.toolCalls).filter((c) => c.ok && ["view_cart", "add_to_cart", "update_cart"].includes(c.name));
+            const last = cartCalls[cartCalls.length - 1];
+            if (last) onCart(((last.output as { carts?: CartView[] } | undefined)?.carts ?? []));
+          }
           setSessionId(r.sessionId);
           writeStored(storageKey, r.sessionId);
           await loadSession(r.sessionId, false);
@@ -240,7 +272,29 @@ export function ChatPanel(props: {
         </header>
 
         <div className="flex-1 space-y-3 overflow-y-auto p-4">
-          {entries.length === 0 && <p className="text-sm text-slate-500">{props.placeholder}</p>}
+          {entries.length === 0 && (
+            <div className="space-y-3">
+              <p className="text-sm text-slate-500">{props.placeholder}</p>
+              {props.suggestions && props.suggestions.length > 0 && (
+                <div>
+                  <p className="mb-1.5 text-xs font-medium uppercase tracking-wide text-slate-400">Try asking</p>
+                  <div className="flex flex-wrap gap-2">
+                    {props.suggestions.map((q) => (
+                      <button
+                        key={q}
+                        type="button"
+                        disabled={busy}
+                        onClick={() => void send(q)}
+                        className="rounded-full border border-slate-300 px-3 py-1 text-left text-xs text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                      >
+                        {q}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
           {entries.map((e, i) => {
             if (e.kind === "user") return <p key={i} className="ml-auto max-w-[85%] whitespace-pre-wrap rounded-lg bg-blue-600 px-3 py-2 text-sm text-white">{e.text}</p>;
             if (e.kind === "notice")
@@ -250,7 +304,7 @@ export function ChatPanel(props: {
                 </p>
               );
             const t = e.turn;
-            const products = t ? productsOf(t) : [];
+            const products = t && !onProducts ? productsOf(t) : [];
             return (
               <div key={i} className="max-w-[95%] space-y-2">
                 {e.agent && <p className="text-xs font-medium text-slate-500">{AGENT_LABEL[e.agent]} assistant</p>}
@@ -278,7 +332,8 @@ export function ChatPanel(props: {
                 {t?.checkoutLinks.map((c) =>
                   paid[c.order_id] ? (
                     <p key={c.paypal_order_id} className="rounded bg-positive-soft p-2 text-sm text-positive-ink">
-                      Paid: {paid[c.order_id]!.total.display}. Order status {paid[c.order_id]!.order_status}.
+                      Order placed. Paid {paid[c.order_id]!.total.display}.
+                      {paid[c.order_id]!.delivery && <> Estimated delivery: {paid[c.order_id]!.delivery!.display}.</>}
                     </p>
                   ) : (
                     <div key={c.paypal_order_id} className="rounded border border-blue-200 bg-blue-50 p-3 text-sm">
@@ -289,7 +344,11 @@ export function ChatPanel(props: {
                         cartId={c.order_id}
                         paypalOrderId={c.paypal_order_id}
                         approveUrl={c.approve_url}
-                        onPaid={(o) => setPaid((p) => ({ ...p, [c.order_id]: o }))}
+                        onPaid={(o) => {
+                          setPaid((p) => ({ ...p, [c.order_id]: o }));
+                          // The agent confirms from the order record, not from this message.
+                          if (o.order_status === "PAID") void send(`I approved the payment in PayPal (order ${c.order_id}).`);
+                        }}
                       />
                     </div>
                   ),

@@ -5,6 +5,7 @@ import { type FxApi, frankfurter } from "../clients/frankfurter";
 import { type CaptureResult, PayPalApiError, type PayPalApi, type PayPalOrderStatus } from "../clients/paypal";
 import { coreConfig } from "../config";
 import { type Db, prisma } from "../db";
+import { estimateDelivery, type DeliveryEstimate } from "../domain/delivery";
 import { estimateSaleFees, FEE_TABLE } from "../domain/fees";
 import { getMarket } from "../domain/markets";
 import { applyBps, convertMinor, money } from "../domain/money";
@@ -203,7 +204,17 @@ export type CaptureOutcome = {
   payment_status: string;
   total: ReturnType<typeof money>;
   already_captured: boolean;
+  /** Present once the order is PAID. */
+  delivery?: DeliveryEstimate;
 };
+
+/** Estimated delivery for a paid order: seller country to the market the order was placed in. */
+export async function deliveryFor(orderId: string): Promise<DeliveryEstimate | undefined> {
+  const o = await prisma.order.findUnique({ where: { id: orderId }, include: { seller: true } });
+  if (!o || o.status !== "PAID" || !o.paid_at) return undefined;
+  const market = getMarket(o.locale);
+  return estimateDelivery(o.seller.country, market.country, o.paid_at, o.locale);
+}
 
 /**
  * Records a capture result on a payment. Only CREATED or PENDING payments move
@@ -265,6 +276,7 @@ async function captureOutcome(paymentId: string, alreadyCaptured: boolean): Prom
     payment_status: p.status,
     total: money(p.gross_minor, p.currency, p.order.locale),
     already_captured: alreadyCaptured,
+    delivery: await deliveryFor(p.order_id),
   };
 }
 
