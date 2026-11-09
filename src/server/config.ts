@@ -33,6 +33,8 @@ const groqSchema = z.object({
   /** Runs the four agents (multi-step tool use). */
   GROQ_AGENT_MODEL: nonEmpty.default("openai/gpt-oss-120b"),
   GROQ_AGENT_REASONING_EFFORT: reasoningEffort.default("medium"),
+  /** Market price research: a model with Groq's built-in browser_search tool. */
+  GROQ_SEARCH_MODEL: nonEmpty.default("openai/gpt-oss-20b"),
 });
 
 const paypalSchema = z.object({

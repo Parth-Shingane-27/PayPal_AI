@@ -13,9 +13,9 @@ export const AGENTS: Record<AgentName, AgentSpec> = {
     name: "LISTING",
     system: LISTING_PROMPT,
     tools: [...LISTING_TOOLS, handoffTool],
-    // Localizing many markets takes many steps.
+    // Localizing many markets takes many steps, and market research ~10-20 s per market.
     maxModelCalls: 40,
-    timeoutMs: 3 * 60_000,
+    timeoutMs: 5 * 60_000,
   },
   SHOPPING: {
     name: "SHOPPING",

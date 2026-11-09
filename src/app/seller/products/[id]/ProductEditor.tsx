@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { api, decimalOf, type Money } from "@/components/api";
 import { AskAi } from "@/components/AskAi";
 import { ChatPanel } from "@/components/ChatPanel";
+import { MarketPrices, type Positioning, POSITIONING_LABEL } from "./MarketPrices";
 
 type Listing = {
   id: string;
@@ -13,7 +14,13 @@ type Listing = {
   description: string;
   seo_title: string;
   price: Money;
-  pricing: { profit?: Money; margin_percent?: number; warnings?: { message: string }[]; fees_are_estimates?: boolean } | null;
+  pricing: {
+    profit?: Money;
+    margin_percent?: number;
+    warnings?: { message: string }[];
+    fees_are_estimates?: boolean;
+    market?: { range: { low: Money; median: Money; high: Money }; position: string; offers_compared: number } | null;
+  } | null;
   embedded: boolean;
 };
 type Data = {
@@ -84,6 +91,12 @@ function ListingCard({ l, onChange }: { l: Listing; onChange: () => void }) {
               Estimated profit {l.pricing.profit.display} · margin {l.pricing.margin_percent}%{l.pricing.fees_are_estimates ? " (fee estimates)" : ""}
             </p>
           )}
+          {l.pricing?.market && (
+            <p className="mt-0.5 text-xs text-slate-600">
+              Market {l.pricing.market.range.low.display}–{l.pricing.market.range.high.display} (median {l.pricing.market.range.median.display}, {l.pricing.market.offers_compared} offers) ·{" "}
+              {MARKET_POSITION[l.pricing.market.position] ?? l.pricing.market.position}
+            </p>
+          )}
           {l.pricing?.warnings?.map((w) => (
             <p key={w.message} className="text-xs text-amber-700">
               {w.message}
@@ -111,14 +124,21 @@ function ListingCard({ l, onChange }: { l: Listing; onChange: () => void }) {
   );
 }
 
+const MARKET_POSITION: Record<string, string> = {
+  BELOW_MARKET: "below every comparable price",
+  LOWER_HALF: "below the median",
+  UPPER_HALF: "above the median",
+  ABOVE_MARKET: "above every comparable price",
+};
+
 type MarketInfo = { locale: string; language: string; currency: string };
 type LocalizeResult = {
-  saved: { listing_id: string; market: string; price: Money; profit: Money; margin_percent: number }[];
+  saved: { listing_id: string; market: string; price: Money; profit: Money; margin_percent: number; market_position: string | null }[];
   failed: { market: string; error: string }[];
 };
 
 /** One click: pick markets, get priced and translated drafts. Prices are calculated by code; the AI writes the text. */
-function CreateListings({ productId, existing, onDone }: { productId: string; existing: string[]; onDone: () => void }) {
+function CreateListings({ productId, existing, positioning, onDone }: { productId: string; existing: string[]; positioning: Positioning; onDone: () => void }) {
   const [markets, setMarkets] = useState<MarketInfo[]>([]);
   const [chosen, setChosen] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
@@ -133,7 +153,7 @@ function CreateListings({ productId, existing, onDone }: { productId: string; ex
     setError(null);
     setResult(null);
     try {
-      const r = await api<LocalizeResult>(`/api/products/${productId}/localize`, { body: { markets: chosen } });
+      const r = await api<LocalizeResult>(`/api/products/${productId}/localize`, { body: { markets: chosen, positioning } });
       setResult(r);
       setChosen([]);
       onDone();
@@ -148,7 +168,10 @@ function CreateListings({ productId, existing, onDone }: { productId: string; ex
   return (
     <section className="rounded-lg bg-white p-4 shadow-sm">
       <h2 className="font-semibold">Sell in more countries</h2>
-      <p className="text-sm text-slate-600">Tick the markets, then click once. Each gets a local price and a listing written in its language, saved as a draft for you to check and publish.</p>
+      <p className="text-sm text-slate-600">
+        Tick the markets, then click once. Each gets a local price and a listing written in its language, saved as a draft for you to check and publish. Markets you checked above are priced{" "}
+        <strong>{POSITIONING_LABEL[positioning].title.toLowerCase()}</strong> ({POSITIONING_LABEL[positioning].hint}), never below your target margin; others from cost and margin.
+      </p>
       <div className="mt-3 flex flex-wrap gap-2">
         {markets.map((m) => (
           <label key={m.locale} className={`flex cursor-pointer items-center gap-1.5 rounded border px-2 py-1 text-sm ${chosen.includes(m.locale) ? "border-blue-500 bg-blue-50" : "border-slate-300"}`}>
@@ -166,7 +189,7 @@ function CreateListings({ productId, existing, onDone }: { productId: string; ex
         <div className="mt-2 space-y-1 text-sm">
           {result.saved.map((s) => (
             <p key={s.listing_id} className="text-positive-ink">
-              ✓ {s.market}: {s.price.display} · profit {s.profit.display} ({s.margin_percent}%) — draft saved below
+              ✓ {s.market}: {s.price.display} · profit {s.profit.display} ({s.margin_percent}%){s.market_position ? ` · ${MARKET_POSITION[s.market_position] ?? s.market_position}` : ""} — draft saved below
             </p>
           ))}
           {result.failed.map((f) => (
@@ -184,6 +207,7 @@ function CreateListings({ productId, existing, onDone }: { productId: string; ex
 export function ProductEditor({ productId }: { productId: string }) {
   const [data, setData] = useState<Data | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [positioning, setPositioning] = useState<Positioning>("market");
   const load = useCallback(
     () =>
       api<Data>(`/api/products/${productId}`)
@@ -208,7 +232,8 @@ export function ProductEditor({ productId }: { productId: string }) {
         <p className="mt-2 whitespace-pre-wrap text-sm">{p.description}</p>
         <pre className="mt-2 overflow-auto rounded bg-slate-50 p-2 text-xs">{JSON.stringify(p.attributes, null, 2)}</pre>
       </section>
-      <CreateListings productId={p.id} existing={data.listings.map((l) => l.locale)} onDone={load} />
+      <MarketPrices productId={p.id} positioning={positioning} onPositioning={setPositioning} onListingsChanged={load} />
+      <CreateListings productId={p.id} existing={data.listings.map((l) => l.locale)} positioning={positioning} onDone={load} />
       <section>
         <h2 className="mb-2 font-semibold">Listings by market</h2>
         {data.listings.length === 0 && <p className="text-sm text-slate-500">No listings yet. Use &ldquo;Sell in more countries&rdquo; above.</p>}
@@ -218,12 +243,12 @@ export function ProductEditor({ productId }: { productId: string }) {
           ))}
         </div>
       </section>
-      <AskAi label="Ask the listing assistant" hint="For anything special, e.g. matching a competitor price range or rewriting a description.">
+      <AskAi label="Ask the listing assistant" hint="It researches market prices, prices each market, writes native listings, and explains where you are over- or under-priced.">
         <ChatPanel
           title="Listing Agent"
           agent="LISTING"
           productId={p.id}
-          placeholder='Try: "Localize this for Germany. Competitors there sell at 45–60 EUR."'
+          placeholder='Try: "What does this sell for in Germany and Japan? Price it to match the market and list it."'
           onResult={load}
         />
       </AskAi>

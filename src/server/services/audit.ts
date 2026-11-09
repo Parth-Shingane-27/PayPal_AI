@@ -107,7 +107,7 @@ export type RunUsage = {
 /** One MODEL row per agent run with its token usage. */
 export async function recordModelRun(
   ctx: AuditCtx,
-  r: { usage: RunUsage; outcome: string; error?: string; durationMs: number; tool?: "model.run" | "model.route" | "model.localize" },
+  r: { usage: RunUsage; outcome: string; error?: string; durationMs: number; tool?: "model.run" | "model.route" | "model.localize" | "model.market_search" | "model.market_extract" },
 ): Promise<void> {
   await prisma.agentAction.create({
     data: {

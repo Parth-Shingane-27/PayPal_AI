@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { groqConfig } from "../config";
+import type { Positioning } from "../domain/market-prices";
 import { getMarket, MARKET_LOCALES } from "../domain/markets";
 import { AppError } from "../errors";
 import { liveModel, type ModelApi } from "../agents/model";
@@ -123,11 +124,23 @@ export type LocalizeResult = {
     profit: PriceQuote["profit"];
     margin_percent: number;
     warnings: PriceQuote["warnings"];
+    market_position: NonNullable<PriceQuote["market"]>["position"] | null;
   }[];
   failed: { market: string; error: string }[];
 };
 
-export async function localizeProduct(sellerId: string, productId: string, markets: string[], model: ModelApi = liveModel): Promise<LocalizeResult> {
+/**
+ * `positioning` aims each price at the market's lower quartile, median or upper
+ * quartile when market research exists for that market (never below the
+ * margin floor); without research the price is cost plus margin.
+ */
+export async function localizeProduct(
+  sellerId: string,
+  productId: string,
+  markets: string[],
+  model: ModelApi = liveModel,
+  opts: { positioning?: Positioning } = {},
+): Promise<LocalizeResult> {
   const locales = [...new Set(markets)];
   if (locales.length === 0) throw new AppError("INVALID_INPUT", "Choose at least one market.");
   for (const l of locales) getMarket(l); // INVALID_INPUT for an unknown market
@@ -139,7 +152,7 @@ export async function localizeProduct(sellerId: string, productId: string, marke
   const failed: LocalizeResult["failed"] = [];
   for (const locale of locales) {
     try {
-      quotes.set(locale, await quotePrice(sellerId, { productId, locale }));
+      quotes.set(locale, await quotePrice(sellerId, { productId, locale, positioning: opts.positioning }));
     } catch (err) {
       if (!(err instanceof AppError)) throw err;
       failed.push({ market: locale, error: err.message });
@@ -178,6 +191,7 @@ export async function localizeProduct(sellerId: string, productId: string, marke
         profit: quote.profit,
         margin_percent: quote.margin_percent,
         warnings: quote.warnings,
+        market_position: quote.market?.position ?? null,
       });
     }
   }

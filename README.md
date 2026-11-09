@@ -39,7 +39,7 @@ Keys in `.env` (each is checked only when that integration is used):
 | `PAYPAL_CLIENT_ID`, `PAYPAL_CLIENT_SECRET` | checkout, refunds, payouts (sandbox REST app) |
 | `PAYPAL_WEBHOOK_ID` | webhook signature verification (worker) |
 
-Optional: `GROQ_AGENT_MODEL` (default `openai/gpt-oss-120b`), `GROQ_AGENT_REASONING_EFFORT` (`low` / `medium` / `high`, default `medium`), `GROQ_MODEL` (routing; default `openai/gpt-oss-20b`; must support strict structured outputs), `GROQ_REASONING_EFFORT` (default `low`), `PLATFORM_FEE_BPS` (default 500), `SEED_US_PAYOUT_EMAIL` / `SEED_DE_PAYOUT_EMAIL` (sandbox personal accounts that receive seller payouts). Demo login is always on outside production; set `DEMO_LOGIN=true` to allow it under `next start`.
+Optional: `GROQ_SEARCH_MODEL` (market price research with Groq's built-in `browser_search`; default `openai/gpt-oss-20b`), `GROQ_AGENT_MODEL` (default `openai/gpt-oss-120b`), `GROQ_AGENT_REASONING_EFFORT` (`low` / `medium` / `high`, default `medium`), `GROQ_MODEL` (routing; default `openai/gpt-oss-20b`; must support strict structured outputs), `GROQ_REASONING_EFFORT` (default `low`), `PLATFORM_FEE_BPS` (default 500), `SEED_US_PAYOUT_EMAIL` / `SEED_DE_PAYOUT_EMAIL` (sandbox personal accounts that receive seller payouts). Demo login is always on outside production; set `DEMO_LOGIN=true` to allow it under `next start`.
 
 When you add `VOYAGE_API_KEY`, restart the worker: on boot it re-queues embeddings for every published listing that has none.
 
@@ -52,6 +52,18 @@ npm run db:drift                                # must print "-- This is an empt
 npm run eval                                    # LIVE: spends Groq credit (see below)
 npm run eval -- --smoke                         # LIVE: one conversation per agent
 ```
+
+## Market prices (Listing Agent)
+
+On a product's page, **Market prices** shows what comparable products sell for in each market before the seller sets a price:
+
+- **Where prices come from.** For each market, a Groq model with the built-in `browser_search` tool searches that country's shops (in its language) and reports offers. A second strict `json_schema` call turns the report into offers. The product's semantic neighbours from *other* GlobalCart sellers (pgvector) are added.
+- **What code checks.** An offer is dropped if its URL was never returned by the search tool, if it is used, or if its price or pack size is unusable. Pack prices are divided into unit prices. Prices are converted into the market currency at today's ECB rate (INR and other non-GlobalCart currencies included). Outliers outside 1.5 × IQR are removed. The range (low, quartiles, median, high) is computed in code. Each offer says whether its price was found on the page the search opened.
+- **Pricing.** `suggest_price` and the one-click **Create listings** take a positioning: *competitive* (lower quartile), *match the market* (median) or *premium* (upper quartile). The price aims there but never goes below the product's margin floor. Every quote reports where its price sits in the market. Warnings cover a price above or below every comparable offer, and costs that put the margin floor above the market median (`COSTS_ABOVE_MARKET`). **Use this price** reprices an existing listing (back to DRAFT).
+- **Caching.** Research is stored in `market_price_research` and reused for 24 hours (**Refresh** searches again). Pricing uses research up to 7 days old. A failed search is never reused.
+- **Agent.** The Listing Agent researches before pricing, shows the market table, explains positioning and margin, and can answer "where should I sell?" with `market_overview`: price per market in the home currency, sales, traffic, and price vs market.
+
+API: `GET/POST /api/products/:id/market-prices` (`{markets, refresh}`), `POST /api/listings/:id/reprice` (`{positioning}`).
 
 ## Dashboards
 
@@ -82,7 +94,7 @@ Worker (Fastify + BullMQ): POST /webhooks/paypal → verify → store once → q
 
 | Agent | Reached from | Tools |
 |---|---|---|
-| Listing | product editor | get_product, list_markets, get_fx_rate, suggest_price, save_listing_draft, handoff |
+| Listing | product editor | get_product, preview_product, create_product, list_markets, market_overview, research_market_prices, get_fx_rate, suggest_price, save_listing_draft, reprice_listing, handoff |
 | Shopping | `/shop` (buyers only) | search_products, compare_products, add_to_cart, update_cart, view_cart, create_paypal_order |
 | Treasury | treasury screen | get_balances, estimate_fees, forecast_earnings, compare_selling_direct, propose_payout_schedule, handoff |
 | Operations | operations screen | query_orders, get_order_details, get_payment_status, earnings_by_market, detect_anomalies, propose_refund, handoff |
@@ -149,5 +161,6 @@ The script prints pass/fail per case, token usage per model and the estimated co
 - Fee figures used for pricing, comparisons and payout planning are estimates from a fixed table. Recorded payments use PayPal's actual fees.
 - Historical seed orders are demo data (capture ids start with `SEED-`). They count in the ledger and analytics, but they cannot be refunded through PayPal.
 - Payouts are one item per batch. A batch item that ends `UNCLAIMED` (receiver has no PayPal account) counts as sent.
+- Market price research is token-heavy: one market's web search sends roughly 30k–90k input tokens (search results and opened pages). Groq's free tier allows 200k tokens per model per day, so expect only a few market checks a day on it. When the daily cap is reached, the panel says so and pricing falls back to cost and margin. Observed shop prices may include VAT and exclude shipping; they are a guide, not a guarantee.
 - Groq's free tier allows 8,000 tokens per minute per model. One agent step sends about 2,200 tokens, so a busy chat waits for the limit to reset. The paid Developer tier removes this wait. The buttons on each page (create listings, add to cart, pay, refund, pay out) use no AI or a single short call.
 - AG Grid, Bryntum, next-intl UI translation and PayPal's marketplace/partner split are out of scope for this build.

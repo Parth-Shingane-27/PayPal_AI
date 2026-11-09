@@ -4,7 +4,8 @@ import { prisma } from "../../db";
 import { listMarkets, MARKET_LOCALES } from "../../domain/markets";
 import { money, SUPPORTED_CURRENCIES } from "../../domain/money";
 import { AppError } from "../../errors";
-import { createProduct, productFromForm, productView, saveListingDraft, SEO_TITLE_MAX } from "../../services/catalog";
+import { createProduct, productFromForm, productView, saveListingDraft, SEO_TITLE_MAX, setListingPrice } from "../../services/catalog";
+import { productMarketOverview, researchMarketPrices } from "../../services/market-research";
 import { type PriceQuote, quotePrice } from "../../services/pricing";
 import { defineTool } from "../tool";
 import { decimalAmount, sellerOf, uuid } from "./common";
@@ -42,7 +43,7 @@ const getFxRateTool = defineTool({
 const suggestPriceTool = defineTool({
   name: "suggest_price",
   description:
-    "Compute the local price for a product in one market: converts cost plus shipping at today's rate, applies estimated PayPal, international, conversion and platform fees, meets the product's target margin, and rounds up to a natural price point. Pass the competitor range only if the seller gave one (both ends, in the market currency), and target_price only if the seller asked to evaluate a specific price. Returns a quote with quote_id, suggested_price, profit, margin, fee breakdown and warnings, each amount with a `display` string. Call it once per market before save_listing_draft. It never saves anything.",
+    "Compute the local price for a product in one market: converts cost plus shipping at today's rate, applies estimated PayPal, international, conversion and platform fees, meets the product's target margin, and rounds up to a natural price point. With positioning (competitive = lower quartile, market = median, premium = upper quartile of the prices found by research_market_prices) it aims at that market price, but never below the margin floor. Pass the competitor range only if the seller gave one (both ends, in the market currency), and target_price only if the seller asked to evaluate a specific price; either overrides positioning. Returns a quote with quote_id, suggested_price, margin_floor_price, profit, margin, fee breakdown, market (range, where the price sits, cheaper_offers_percent) and warnings, each amount with a `display` string. Call it once per market before save_listing_draft or reprice_listing. It never saves anything.",
   kind: "read",
   input: z.object({
     product_id: uuid(),
@@ -50,6 +51,10 @@ const suggestPriceTool = defineTool({
     competitor_low: decimalAmount().nullable().describe("Low end of the seller's competitor range in the market currency, or null."),
     competitor_high: decimalAmount().nullable().describe("High end of the competitor range, or null."),
     target_price: decimalAmount().nullable().describe("A specific price the seller wants evaluated, or null for a suggestion."),
+    positioning: z
+      .enum(["competitive", "market", "premium"])
+      .nullable()
+      .describe("Aim at the researched market price: competitive (lower quartile), market (median) or premium (upper quartile). Null prices from cost and margin only."),
   }),
   async run(ctx, input) {
     const quote = await quotePrice(sellerOf(ctx), {
@@ -58,6 +63,7 @@ const suggestPriceTool = defineTool({
       competitorLow: input.competitor_low ?? undefined,
       competitorHigh: input.competitor_high ?? undefined,
       targetPrice: input.target_price ?? undefined,
+      positioning: input.positioning ?? undefined,
     });
     return { quote_id: ctx.actionId, ...quote };
   },
@@ -97,9 +103,90 @@ const saveListingDraftTool = defineTool({
       price: quote.suggested_price,
       profit: quote.profit,
       margin_percent: quote.margin_percent,
+      market_position: quote.market ? { position: quote.market.position, range: quote.market.range } : null,
       warnings: quote.warnings,
       seo_title_length: [...listing.seo_title].length,
       message: "Saved as DRAFT. The seller publishes it from the listing editor.",
+    };
+  },
+});
+
+const researchMarketPricesTool = defineTool({
+  name: "research_market_prices",
+  description:
+    "Find what comparable products sell for in each market: searches that country's online shops (in its language) and other sellers on GlobalCart. Code validates every offer (its URL must come from the search, used items are dropped), divides pack prices into unit prices, converts them into the market currency at today's ECB rate, drops outliers and computes the range. Returns per market: range (low, p25, median, p75, high), the offers with shop, title, unit_price, listed_price, url and whether the price was confirmed on the page, the seller's current listing price, and notes. Research from the last 24 hours is reused unless refresh is true. Takes about 10-20 seconds per market. Call it before pricing a market so suggest_price can use positioning. Read-only; it changes no listing.",
+  kind: "read",
+  input: z.object({
+    product_id: uuid(),
+    markets: z.array(z.enum(MARKET_LOCALES)).min(1).max(6).describe("Market locales to research, at most 6 per call."),
+    refresh: z.boolean().nullable().describe("true to search again even if research from the last 24 hours exists; null or false to reuse it."),
+  }),
+  async run(ctx, input) {
+    const results = await researchMarketPrices(sellerOf(ctx), input.product_id, input.markets, { refresh: input.refresh ?? false });
+    return {
+      markets: results.map((r) => {
+        if ("error" in r) return { market: r.market, error: r.error };
+        const x = r.result;
+        return {
+          market: r.market,
+          currency: x.currency,
+          researched_at: x.researched_at,
+          reused_earlier_research: r.cached,
+          comparable_prices_found: x.stats?.count ?? 0,
+          range: x.range,
+          your_listing: x.your_listing,
+          offers: x.offers.slice(0, 10).map((o) => ({
+            source: o.source,
+            shop: o.shop,
+            title: o.title,
+            unit_price: o.unit_price,
+            listed_price: o.listed_price,
+            match: o.match,
+            price_confirmed_on_page: o.price_on_page,
+            url: o.url,
+          })),
+          web_search: x.web.status === "failed" ? { status: "failed", error: x.web.error } : { status: x.web.status },
+          notes: [...x.notes, ...(x.globalcart.note ? [x.globalcart.note] : [])],
+        };
+      }),
+      note: "Observed prices from public shop pages. Prices include whatever the shop includes (often VAT, sometimes not shipping); treat them as a guide.",
+    };
+  },
+});
+
+const marketOverviewTool = defineTool({
+  name: "market_overview",
+  description:
+    "One product across every GlobalCart market: listing status and price per market, that price in the seller's home currency, units sold (90 days), views and add-to-carts (30 days), the latest researched market range and whether the price is above, inside or below it. Use it to answer where to sell next, why a market is not selling, or whether prices are consistent across markets. Read-only.",
+  kind: "read",
+  input: z.object({ product_id: uuid() }),
+  run: (ctx, input) => productMarketOverview(sellerOf(ctx), input.product_id),
+});
+
+const repriceListingTool = defineTool({
+  name: "reprice_listing",
+  description:
+    "Change only the price of the product's existing listing in a market to a suggest_price quote's suggested_price, keeping its title and description. Pass the quote_id. The listing goes back to DRAFT so the seller reviews and publishes it again. Use it when the seller wants a new price without rewriting the listing. Returns the old and new price.",
+  kind: "draft",
+  input: z.object({ quote_id: uuid().describe("quote_id returned by suggest_price in this conversation.") }),
+  async run(ctx, input) {
+    const sellerId = sellerOf(ctx);
+    const quoteRow = await prisma.agentAction.findFirst({
+      where: { id: input.quote_id, tool: "suggest_price", status: "SUCCEEDED", seller_id: sellerId },
+    });
+    if (!quoteRow?.output) throw new AppError("NOT_FOUND", "Quote not found. Call suggest_price for this market first and use its quote_id.");
+    const quote = quoteRow.output as unknown as PriceQuote & { quote_id: string };
+    const { before: existing, listing } = await setListingPrice(sellerId, quote.product_id, quote.locale, quote.suggested_price.amount_minor, quote);
+    return {
+      listing_id: listing.id,
+      market: listing.locale,
+      status: listing.status,
+      old_price: money(existing.price_minor, existing.currency, existing.locale),
+      new_price: quote.suggested_price,
+      profit: quote.profit,
+      margin_percent: quote.margin_percent,
+      warnings: quote.warnings,
+      message: "Price changed and saved as DRAFT. The seller publishes it again from the listing editor.",
     };
   },
 });
@@ -216,4 +303,15 @@ const createProductTool = defineTool({
   },
 });
 
-export const LISTING_TOOLS = [getProductTool, previewProductTool, createProductTool, listMarketsTool, getFxRateTool, suggestPriceTool, saveListingDraftTool];
+export const LISTING_TOOLS = [
+  getProductTool,
+  previewProductTool,
+  createProductTool,
+  listMarketsTool,
+  marketOverviewTool,
+  researchMarketPricesTool,
+  getFxRateTool,
+  suggestPriceTool,
+  saveListingDraftTool,
+  repriceListingTool,
+];

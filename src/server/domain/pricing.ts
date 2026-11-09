@@ -33,6 +33,8 @@ type PriceInputs = {
   competitor?: { lowMinor: number; highMinor: number };
   /** Price the seller asked to evaluate; used as-is, without rounding. */
   targetPriceMinor?: number;
+  /** Observed market price to aim for (from market research); never priced below the margin floor. */
+  marketAnchorMinor?: number;
 };
 
 export type PriceWarning =
@@ -45,7 +47,7 @@ type PriceResult = {
   price_minor: number;
   /** Lowest price that meets the target margin, before rounding. */
   floor_price_minor: number;
-  strategy: "MARGIN_FLOOR" | "COMPETITOR_LOW" | "SELLER_TARGET";
+  strategy: "MARGIN_FLOOR" | "COMPETITOR_LOW" | "SELLER_TARGET" | "MARKET_ANCHOR";
   fees: SaleFeeBreakdown;
   profit_minor: number;
   /** Profit / price, in basis points. */
@@ -79,7 +81,7 @@ export function marginFloor(inputs: PriceInputs): number {
 
 export function suggestPrice(inputs: PriceInputs): PriceResult {
   const floor = marginFloor(inputs);
-  const { competitor, targetPriceMinor, rounding, sale } = inputs;
+  const { competitor, targetPriceMinor, marketAnchorMinor, rounding, sale } = inputs;
 
   let price: number;
   let strategy: PriceResult["strategy"];
@@ -89,6 +91,9 @@ export function suggestPrice(inputs: PriceInputs): PriceResult {
   } else if (competitor && floor < competitor.lowMinor) {
     price = roundUpToPricePoint(competitor.lowMinor, rounding, sale.currency);
     strategy = "COMPETITOR_LOW";
+  } else if (!competitor && marketAnchorMinor !== undefined && floor < marketAnchorMinor) {
+    price = roundUpToPricePoint(marketAnchorMinor, rounding, sale.currency);
+    strategy = "MARKET_ANCHOR";
   } else {
     price = roundUpToPricePoint(floor, rounding, sale.currency);
     strategy = "MARGIN_FLOOR";

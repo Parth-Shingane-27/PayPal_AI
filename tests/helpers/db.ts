@@ -5,7 +5,7 @@ import { getMarket } from "@/server/domain/markets";
 /** Empties every table in the test database. */
 export async function resetDb(): Promise<void> {
   await prisma.$executeRawUnsafe(`TRUNCATE TABLE
-    messages, conversations, listing_daily_stats, agent_actions, agent_sessions, webhook_events, payouts, payout_schedules, refunds, payments,
+    market_price_research, messages, conversations, listing_daily_stats, agent_actions, agent_sessions, webhook_events, payouts, payout_schedules, refunds, payments,
     order_items, orders, listings, products, buyers, sellers RESTART IDENTITY CASCADE`);
 }
 

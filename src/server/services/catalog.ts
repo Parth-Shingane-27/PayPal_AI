@@ -175,6 +175,25 @@ export async function editListing(sellerId: string, listingId: string, edit: z.i
   });
 }
 
+/**
+ * Changes only a listing's price, keeping its text, and stores the quote it
+ * came from. The listing goes back to DRAFT: the seller publishes again.
+ */
+export async function setListingPrice(sellerId: string, productId: string, locale: string, priceMinor: number, pricing: unknown) {
+  const existing = await prisma.listing.findFirst({ where: { seller_id: sellerId, product_id: productId, locale } });
+  if (!existing) throw new AppError("NOT_FOUND", `There is no listing in ${locale} yet. Write one first.`);
+  const listing = await saveListingDraft(sellerId, {
+    productId,
+    locale,
+    title: existing.title,
+    description: existing.description,
+    seoTitle: existing.seo_title,
+    priceMinor,
+    pricing,
+  });
+  return { before: existing, listing };
+}
+
 /** The seller's approval click: DRAFT -> PUBLISHED, then (re-)embed for search. */
 export async function publishListing(sellerId: string, listingId: string) {
   const listing = await prisma.listing.findFirst({ where: { id: listingId, seller_id: sellerId } });

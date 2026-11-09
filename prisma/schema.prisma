@@ -139,6 +139,7 @@ model Seller {
   agent_sessions   AgentSession[]
   agent_actions    AgentAction[]
   conversations    Conversation[]
+  market_research  MarketPriceResearch[]
 
   @@map("sellers")
 }
@@ -188,9 +189,10 @@ model Product {
   created_at     DateTime @default(now()) @db.Timestamptz(3)
   updated_at     DateTime @updatedAt @db.Timestamptz(3)
 
-  seller        Seller         @relation(fields: [seller_id], references: [id])
-  listings      Listing[]
-  conversations Conversation[]
+  seller          Seller                @relation(fields: [seller_id], references: [id])
+  listings        Listing[]
+  conversations   Conversation[]
+  market_research MarketPriceResearch[]
 
   @@unique([seller_id, sku])
   @@index([seller_id])
@@ -227,6 +229,30 @@ model Listing {
   @@map("listings")
 }
 
+/// One market price check for a product in one market: prices observed in
+/// online shops (web search) and on GlobalCart, converted into the market
+/// currency by code. Kept as history; pricing uses the newest fresh one.
+model MarketPriceResearch {
+  id          String   @id @default(uuid(7)) @db.Uuid
+  seller_id   String   @db.Uuid
+  product_id  String   @db.Uuid
+  locale      String
+  /// Market currency every amount in `result` is converted into.
+  currency    String   @db.Char(3)
+  /// Offers, stats, sources and notes, as returned to the UI and the agent.
+  result      Json
+  /// Number of web offers kept after validation (0 = nothing usable found).
+  offer_count Int
+  created_at  DateTime @default(now()) @db.Timestamptz(3)
+
+  seller  Seller  @relation(fields: [seller_id], references: [id])
+  product Product @relation(fields: [product_id], references: [id], onDelete: Cascade)
+
+  @@index([product_id, locale, created_at])
+  @@index([seller_id])
+  @@map("market_price_research")
+}
+
 // ---------------------------------------------------------------------------
 // Orders and money
 // ---------------------------------------------------------------------------
@@ -247,8 +273,8 @@ model Order {
   created_at DateTime    @default(now()) @db.Timestamptz(3)
   updated_at DateTime    @updatedAt @db.Timestamptz(3)
 
-  buyer    Buyer       @relation(fields: [buyer_id], references: [id])
-  seller   Seller      @relation(fields: [seller_id], references: [id])
+  buyer         Buyer          @relation(fields: [buyer_id], references: [id])
+  seller        Seller         @relation(fields: [seller_id], references: [id])
   items         OrderItem[]
   payments      Payment[]
   refunds       Refund[]

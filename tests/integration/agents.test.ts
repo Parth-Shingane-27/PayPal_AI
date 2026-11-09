@@ -33,7 +33,7 @@ describe("agent definitions", () => {
   it("give every agent the tools the design calls for", () => {
     const names = Object.fromEntries(Object.values(AGENTS).map((a) => [a.name, a.tools.map((t) => t.name)]));
     expect(names).toEqual({
-      LISTING: ["get_product", "preview_product", "create_product", "list_markets", "get_fx_rate", "suggest_price", "save_listing_draft", "handoff"],
+      LISTING: ["get_product", "preview_product", "create_product", "list_markets", "market_overview", "research_market_prices", "get_fx_rate", "suggest_price", "save_listing_draft", "reprice_listing", "handoff"],
       SHOPPING: ["search_products", "compare_products", "add_to_cart", "update_cart", "view_cart", "create_paypal_order"],
       TREASURY: ["get_balances", "estimate_fees", "forecast_earnings", "compare_selling_direct", "propose_payout_schedule", "handoff"],
       OPERATIONS: ["query_orders", "get_order_details", "get_payment_status", "earnings_by_market", "detect_anomalies", "propose_refund", "handoff"],
@@ -148,7 +148,7 @@ describe("Listing Agent flow", () => {
     const s = scriptedModel([
       reply([call("g", "get_product", { product_id: product.id })]),
       reply(
-        markets.map((m, i) => call(`q${i}`, "suggest_price", { product_id: product.id, market: m, competitor_low: null, competitor_high: null, target_price: null }))),
+        markets.map((m, i) => call(`q${i}`, "suggest_price", { product_id: product.id, market: m, competitor_low: null, competitor_high: null, target_price: null, positioning: null }))),
       (params) => {
         const quotes = lastResults(params);
         expect(quotes).toHaveLength(3);
@@ -211,7 +211,7 @@ describe("Listing Agent flow", () => {
       (params) => {
         const created = lastResults(params)[0]!;
         expect(created.is_error).toBe(false);
-        return reply([call("q", "suggest_price", { product_id: created.json.product_id, market: "en-US", competitor_low: null, competitor_high: null, target_price: null })]);
+        return reply([call("q", "suggest_price", { product_id: created.json.product_id, market: "en-US", competitor_low: null, competitor_high: null, target_price: null, positioning: null })]);
       },
       (params) =>
         reply([call("d", "save_listing_draft", { quote_id: lastResults(params)[0]!.json.quote_id, title: "Stoneware mug", description: "12 oz mug.", seo_title: "Hand-thrown 12 oz stoneware mug" })]),

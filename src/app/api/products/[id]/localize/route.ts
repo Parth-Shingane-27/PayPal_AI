@@ -8,6 +8,12 @@ import { localizeProduct } from "@/server/services/localize";
 export const POST = handler(async (req, ctx: { params: Promise<{ id: string }> }) => {
   const seller = await requireSeller(req);
   const productId = await routeId(ctx.params, "Product");
-  const body = await readBody(req, z.object({ markets: z.array(z.enum(MARKET_LOCALES)).min(1).max(MARKET_LOCALES.length) }));
-  return json(await localizeProduct(seller.sellerId, productId, body.markets));
+  const body = await readBody(
+    req,
+    z.object({
+      markets: z.array(z.enum(MARKET_LOCALES)).min(1).max(MARKET_LOCALES.length),
+      positioning: z.enum(["competitive", "market", "premium"]).nullish(),
+    }),
+  );
+  return json(await localizeProduct(seller.sellerId, productId, body.markets, undefined, { positioning: body.positioning ?? undefined }));
 });
