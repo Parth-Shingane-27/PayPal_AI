@@ -83,7 +83,7 @@ export default async function SellerOverview({ searchParams }: { searchParams: P
 
       <FindingsFeed />
 
-      <dl className="grid gap-px overflow-hidden rounded-[10px] border border-rule bg-rule sm:grid-cols-2 lg:grid-cols-5">
+      <dl className="grid gap-px overflow-hidden rounded-[10px] border border-rule bg-rule cq-sm:grid-cols-2 cq-lg:grid-cols-5">
         <Figure label={t("kpi.net")} value={k.net.display}>
           <Delta bps={k.net_change_bps} t={t} />
         </Figure>
@@ -103,7 +103,7 @@ export default async function SellerOverview({ searchParams }: { searchParams: P
 
       <FeeAnatomy data={o.fee_anatomy} periodLabel={t(`ov.period.${periodKey}` as MessageKey)} />
 
-      <div className="grid gap-6 lg:grid-cols-[minmax(0,1.35fr)_minmax(0,1fr)]">
+      <div className="grid gap-6 cq-lg:grid-cols-[minmax(0,1.35fr)_minmax(0,1fr)]">
         <Panel labelledBy="monthly-title">
           <SectionHeading id="monthly-title" title={t("monthly.title")} aside={t("monthly.aside", { currency: o.seller.home_currency })} />
           <SellerMonthlyChart months={o.monthly} currency={o.seller.home_currency} locale={o.seller.locale} title={t("monthly.title")} />
@@ -120,7 +120,7 @@ export default async function SellerOverview({ searchParams }: { searchParams: P
         </Panel>
       </div>
 
-      <div className="grid gap-6 lg:grid-cols-2">
+      <div className="grid gap-6 cq-xl:grid-cols-2">
         <Panel labelledBy="top-products">
           <SectionHeading id="top-products" title={t("best.title")} aside={<Link href={`${base}/ledger?tab=products`} className="text-accent hover:underline">{t("best.all")}</Link>} />
           <ul className="divide-y divide-rule">
@@ -135,10 +135,10 @@ export default async function SellerOverview({ searchParams }: { searchParams: P
                     {t("best.sold", { n: p.units, m: p.markets.length })}
                   </p>
                 </div>
-                <span className="hidden sm:block">
+                <span className="hidden cq-sm:block">
                   <Sparkline values={p.weekly_units} label={t("best.weekly", { title: p.title })} />
                 </span>
-                <span className="num shrink-0 text-right font-semibold text-ink sm:w-24">{p.net_home.display}</span>
+                <span className="num shrink-0 text-right font-semibold text-ink cq-sm:w-24">{p.net_home.display}</span>
               </li>
             ))}
           </ul>

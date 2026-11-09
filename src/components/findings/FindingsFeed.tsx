@@ -1,13 +1,13 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
+import { openAssistant } from "@/components/assistant/AssistantContext";
 import { api } from "@/components/api";
 import { useI18n } from "@/components/i18n/I18nProvider";
+import { Markdown } from "@/components/Markdown";
 import type { MessageKey } from "@/lib/i18n/messages";
 import { useBase } from "@/lib/use-base";
-import { discussFinding } from "./discuss";
 
 type Agent = "TREASURY" | "OPERATIONS";
 type Finding = {
@@ -36,8 +36,6 @@ const action =
 export function FindingsFeed({ agent }: { agent?: Agent }) {
   const { t } = useI18n();
   const base = useBase();
-  const router = useRouter();
-  const pathname = usePathname();
   const [items, setItems] = useState<Finding[] | null>(null);
   const [failed, setFailed] = useState(false);
   const [checking, setChecking] = useState<"idle" | "busy" | "started">("idle");
@@ -94,11 +92,9 @@ export function FindingsFeed({ agent }: { agent?: Agent }) {
     }
   }
 
+  // Opens the assistant panel on the agent that wrote the finding, resuming that conversation. It works from any page.
   function discuss(f: Finding) {
-    if (!f.session_id) return;
-    const target = f.agent === "TREASURY" ? "treasury" : "operations";
-    const needsNav = discussFinding(f.agent, f.session_id, pathname === `${base}/${target}`);
-    if (needsNav) router.push(`${base}/${target}`);
+    if (f.session_id) openAssistant({ agent: f.agent, sessionId: f.session_id });
   }
 
   if (items === null) return null;
@@ -140,7 +136,7 @@ export function FindingsFeed({ agent }: { agent?: Agent }) {
                 {f.status === "NEW" && <span className="rounded-[3px] bg-ink px-2 py-0.5 font-semibold text-sheet">{t("find.new")}</span>}
               </div>
               <h3 className="mt-1.5 font-semibold leading-snug text-ink">{f.title}</h3>
-              <p className="mt-1 max-w-[70ch] text-[0.95rem] leading-relaxed whitespace-pre-line text-ink-2">{f.body}</p>
+              <Markdown text={f.body} className="mt-1 max-w-[70ch] text-[0.95rem] text-ink-2" />
               <div className="mt-3 flex flex-wrap items-center gap-1.5">
                 {f.action_id && (
                   <Link href={`${base}/approvals`} className={`${action} bg-accent text-sheet hover:brightness-95`}>

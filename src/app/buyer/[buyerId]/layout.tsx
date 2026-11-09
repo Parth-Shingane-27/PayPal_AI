@@ -25,7 +25,7 @@ export default async function BuyerLayout({ children, params }: { children: Reac
   const t = await getT();
   const links: NavLink[] = LINKS.map(({ key, sub, ...l }) => ({ ...l, href: buyerPath(buyer.buyerId, sub), label: t(key) }));
   return (
-    <Shell variant="bar" links={links} who={buyer.name} sub={t("shell.buyer")} initialUnread={unread} tools={<MarketPicker current={buyer.market} />}>
+    <Shell variant="bar" assistant={{ role: "BUYER", paypalClientId: process.env.PAYPAL_CLIENT_ID || null, market: buyer.market }} links={links} who={buyer.name} sub={t("shell.buyer")} initialUnread={unread} tools={<MarketPicker current={buyer.market} />}>
       {children}
     </Shell>
   );

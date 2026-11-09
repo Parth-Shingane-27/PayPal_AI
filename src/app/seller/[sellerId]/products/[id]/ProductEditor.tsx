@@ -3,8 +3,7 @@
 import Link from "next/link";
 import { useCallback, useEffect, useId, useMemo, useState } from "react";
 import { api, decimalOf, type Money } from "@/components/api";
-import { AskAi } from "@/components/AskAi";
-import { ChatPanel } from "@/components/ChatPanel";
+import { usePageAssistant } from "@/components/assistant/AssistantContext";
 import { useI18n } from "@/components/i18n/I18nProvider";
 import { IconBack, IconCheck } from "@/components/icons";
 import { MarketStamp, ProductThumb } from "@/components/ui";
@@ -335,6 +334,8 @@ export function ProductEditor({ productId }: { productId: string }) {
   useEffect(() => {
     void load();
   }, [load]);
+  // The assistant panel opens on the Listing agent for this product; reload after it replies (it may have saved drafts).
+  usePageAssistant({ agent: "LISTING", productId, contextLabel: data?.product.title, onResult: () => void load() });
 
   // Drafts first: they are the ones waiting for the seller.
   const listings = useMemo(() => [...(data?.listings ?? [])].sort((a, b) => ORDER[a.status] - ORDER[b.status] || a.locale.localeCompare(b.locale)), [data]);
@@ -372,7 +373,7 @@ export function ProductEditor({ productId }: { productId: string }) {
       {back}
 
       <section aria-labelledby="product-title" className="overflow-hidden rounded-[12px] border border-rule bg-sheet shadow-[var(--shadow-overlay)]">
-        <div className="flex flex-col gap-5 p-5 sm:flex-row md:p-6">
+        <div className="flex flex-col gap-5 p-5 cq-sm:flex-row md:p-6">
           <ProductThumb src={p.image_url} alt="" size={112} />
           <div className="min-w-0 flex-1">
             <h1 id="product-title" className="font-display text-[2rem] leading-tight font-bold tracking-[-0.025em] text-ink">
@@ -420,16 +421,12 @@ export function ProductEditor({ productId }: { productId: string }) {
           {t("pe.listings")}
         </h2>
         {listings.length === 0 && <p className="rounded-[10px] border border-dashed border-rule-strong px-5 py-6 text-ink-3">{t("pe.none")}</p>}
-        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+        <div className="grid gap-4 cq-md:grid-cols-2 cq-xl:grid-cols-3">
           {listings.map((l) => (
             <ListingCard key={`${l.id}-${l.status}-${l.price.amount_minor}-${l.title}`} l={l} onChange={load} />
           ))}
         </div>
       </section>
-
-      <AskAi label={t("pe.assistant")} hint={t("pe.assistantHint")}>
-        <ChatPanel title={t("pe.assistantTitle")} agent="LISTING" productId={p.id} placeholder={t("pe.assistantPlaceholder")} onResult={load} />
-      </AskAi>
     </div>
   );
 }

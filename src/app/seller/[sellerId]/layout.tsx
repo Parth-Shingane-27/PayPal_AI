@@ -37,7 +37,7 @@ export default async function SellerLayout({ children, params }: { children: Rea
     count: sub === "treasury" ? found.TREASURY : sub === "operations" ? found.OPERATIONS : undefined,
   }));
   return (
-    <Shell variant="rail" links={links} who={seller.name} sub={t("shell.sellsFrom", { country: market.country, currency: market.currency })} initialUnread={unread}>
+    <Shell variant="rail" assistant={{ role: "SELLER" }} links={links} who={seller.name} sub={t("shell.sellsFrom", { country: market.country, currency: market.currency })} initialUnread={unread}>
       {children}
     </Shell>
   );

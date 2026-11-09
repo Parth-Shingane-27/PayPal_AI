@@ -31,6 +31,8 @@ export type AgentSpec = {
 
 export type RunEvent =
   | { type: "model_call"; call: number }
+  /** A piece of the reply text, as the model writes it. Only sent when a caller listens (the chat), never for background runs. */
+  | { type: "text_delta"; text: string }
   | { type: "tool_started"; id: string; name: string; input: unknown }
   | { type: "tool_finished"; id: string; name: string; ok: boolean; durationMs: number; error?: string };
 
@@ -248,7 +250,10 @@ export async function runAgent(input: RunInput): Promise<RunResult> {
             include_reasoning: false,
             max_completion_tokens: maxOutputTokens,
           },
-          { signal: controller.signal },
+          {
+            signal: controller.signal,
+            onTextDelta: input.onEvent ? (text) => input.onEvent?.({ type: "text_delta", text }) : undefined,
+          },
         );
       } catch (err) {
         if (controller.signal.aborted) {

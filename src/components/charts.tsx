@@ -29,7 +29,7 @@ export function FeeAnatomy({ data, periodLabel }: { data: Anatomy; periodLabel: 
   const parts = ANATOMY_PARTS.map((p) => ({ ...p, name: t(p.label), value: data[p.key] as MoneyLike })).filter((p) => p.value.amount_minor > 0);
   return (
     <section aria-labelledby="anatomy-title" className="relative overflow-hidden rounded-[10px] border border-rule bg-sheet">
-      <div className="grid gap-0 md:grid-cols-[minmax(0,1fr)_13.5rem]">
+      <div className="grid gap-0 cq-md:grid-cols-[minmax(0,1fr)_13.5rem]">
         <div className="p-4 md:p-6">
           <h2 id="anatomy-title" className="font-display text-xl font-semibold tracking-[-0.01em]">
             {t("anat.title")}
@@ -69,7 +69,7 @@ export function FeeAnatomy({ data, periodLabel }: { data: Anatomy; periodLabel: 
               <div className="flex h-full w-full items-center justify-center rounded-[4px] bg-sheet-2 text-sm text-ink-3">{t("anat.none")}</div>
             )}
           </div>
-          <ul className="mt-4 grid grid-cols-2 gap-x-4 gap-y-2 text-sm sm:grid-cols-3 lg:grid-cols-5">
+          <ul className="mt-4 grid grid-cols-2 gap-x-4 gap-y-2 text-sm cq-sm:grid-cols-3 cq-lg:grid-cols-5">
             {ANATOMY_PARTS.map((p) => {
               const v = data[p.key] as MoneyLike;
               return (
@@ -90,8 +90,8 @@ export function FeeAnatomy({ data, periodLabel }: { data: Anatomy; periodLabel: 
           </ul>
         </div>
         {/* The stub: what the maker kept, torn off along a perforation. */}
-        <div className="relative flex flex-col justify-center border-t border-dashed border-rule-strong bg-accent-soft px-6 py-5 md:border-t-0 md:border-l">
-          <span className="perforated absolute inset-x-0 -top-[4px] h-[7px] md:hidden" aria-hidden />
+        <div className="relative flex flex-col justify-center border-t border-dashed border-rule-strong bg-accent-soft px-6 py-5 cq-md:border-t-0 cq-md:border-l">
+          <span className="perforated absolute inset-x-0 -top-[4px] h-[7px] cq-md:hidden" aria-hidden />
           <p className="text-sm text-accent-ink">{t("anat.kept")}</p>
           <p className="num font-display text-[3.25rem] leading-none font-bold tracking-[-0.03em] text-accent-ink [font-stretch:85%]">{formatBps(data.kept_bps, 0)}</p>
           <p className="mt-2 text-sm text-accent-ink">

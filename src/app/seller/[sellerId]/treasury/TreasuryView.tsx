@@ -4,8 +4,7 @@ import type { ColDef } from "ag-grid-community";
 import { useEffect, useMemo, useState } from "react";
 import { ForecastChart } from "@/components/agcharts/Charts";
 import { api, type Money } from "@/components/api";
-import { AskAi } from "@/components/AskAi";
-import { ChatPanel } from "@/components/ChatPanel";
+import { usePageAssistant } from "@/components/assistant/AssistantContext";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { AutoProposalsToggle } from "@/components/findings/AutoProposalsToggle";
 import { FindingsFeed } from "@/components/findings/FindingsFeed";
@@ -63,6 +62,8 @@ export function TreasuryView({ period }: { period: DashboardPeriod }) {
   const [confirming, setConfirming] = useState<CapCard | null>(null);
   const [paying, setPaying] = useState(false);
   const [notice, setNotice] = useState<{ tone: "ok" | "error"; text: string } | null>(null);
+  // The assistant panel talks to the Treasury agent here; refresh the figures after it replies (it may have drafted a payout).
+  usePageAssistant({ agent: "TREASURY", onResult: () => setTick((n) => n + 1) });
 
   useEffect(() => {
     api<Overview>("/api/treasury/overview").then(
@@ -138,7 +139,7 @@ export function TreasuryView({ period }: { period: DashboardPeriod }) {
         <SectionHeading id="balances-title" title={t("tre.balances")} aside={t("tre.balancesHint")} />
         {overview && cards.length === 0 && <p className="text-sm text-ink-3">{t("tre.noBalances")}</p>}
         {!overview && <div className="h-40 animate-pulse rounded-[10px] border border-rule bg-sheet-2" aria-hidden />}
-        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+        <div className="grid gap-4 cq-md:grid-cols-2 cq-xl:grid-cols-3">
           {cards.map((c) => {
             const hasMoney = c.available.amount_minor > 0;
             return (
@@ -198,10 +199,6 @@ export function TreasuryView({ period }: { period: DashboardPeriod }) {
           pageSize={20}
         />
       </section>
-
-      <AskAi label={t("tre.assistant")} hint={t("tre.assistantHint")}>
-        <ChatPanel title={t("tre.assistantTitle")} agent="TREASURY" placeholder={t("tre.assistantPlaceholder")} onResult={() => setTick((n) => n + 1)} />
-      </AskAi>
 
       <ConfirmDialog
         open={confirming !== null}

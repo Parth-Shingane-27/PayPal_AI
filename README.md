@@ -115,8 +115,18 @@ Groq usage, as implemented in `runtime.ts`:
   - `length` with a tool call: the call is never run; one retry at 32k output tokens, then a graceful failure.
   - A response with no answer: treated as a refusal; no tools run and the user gets a polite message.
   - Groq's `tool_use_failed` (HTTP 400 for a malformed tool call): one retry, then a graceful failure.
+- **Streaming:** in the chat, each model call is made with `stream: true`; `collectStream` (`model.ts`) reads the stream and still returns a normal completion, so the loop is unchanged. Reply text is sent to the browser as `text_delta` events on the existing SSE channel, and the final `result` always carries the complete reply. Background runs (proactive checks) pass no listener and are not streamed. A streamed `tool_use_failed` error is turned back into the 400 the loop retries on.
+- **Reply formatting:** replies are rendered by `src/components/Markdown.tsx` (tables, bold, lists, code, links) from a parser in `src/lib/markdown.ts` that builds React elements only, never HTML, and only allows web, mail and in-app links.
 - **Errors:** Groq's typed errors (429, 401/403, 400, 5xx) and network failures become readable replies.
 - **Limits:** 15 model calls per message (Listing: 40), a timeout per run, 4000 characters per message, and one run per session at a time.
+
+### The assistant panel
+
+Every chat lives in one side panel (`src/components/assistant/`), mounted once in the shell for sellers and buyers.
+
+- **Layout.** From 1024px up it is a column beside the page, a quarter of the screen wide by default (never under 20rem). Drag its left edge, or focus the handle and use the arrow keys (Shift for bigger steps, Home and End for the limits, Enter or a double-click to reset), to resize it between 280px and half the screen. The collapse button folds it to a 3rem rail. Width and open state are remembered in the browser (`gc-dock-v1`) and applied before first paint. Below 1024px it is a sheet that opens from a floating button and does not touch the layout.
+- **Which agent.** It follows the page (Treasury, Operations, a product's editor, the buyer shop) and falls back to the routing Assistant; a switcher in the header changes agent, and each agent keeps its own conversation. A page can say more with `usePageAssistant({ agent, productId, resumeKey, contextLabel, onResult })`, where `onResult` refreshes the page after a reply. `openAssistant({ agent, sessionId })` opens the panel from anywhere (the findings' Discuss button, "Add with AI").
+- **Content area is a container.** Layouts that used to switch columns on the screen width switch on the width of the content area instead, so the panel can take space without cramping them. Use `cq-sm|md|lg|xl:` on seller pages and `bq-*:` on buyer pages (defined in `globals.css`; each threshold equals the content width the old screen breakpoint gave). Overlays that must cover the whole screen render through `BodyPortal`, because a container is the reference box for `position: fixed` inside it.
 
 ### Proactive Treasury and Operations
 

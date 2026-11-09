@@ -13,7 +13,9 @@ const bodySchema = z.object({
 
 /**
  * Chat over Server-Sent Events. Events: session, routed, model_call,
- * tool_started, tool_finished, handoff, then one `result` (or `error`).
+ * text_delta (a piece of the reply as it is written), tool_started,
+ * tool_finished, handoff, then one `result` (or `error`). The `result` always
+ * carries the complete reply, so a client may ignore text_delta.
  * Identity and market come from the signed session cookie only.
  */
 export async function POST(req: Request): Promise<Response> {

@@ -2,10 +2,10 @@
 
 import Link from "next/link";
 import { useEffect, useId, useMemo, useRef, useState } from "react";
+import { BodyPortal } from "@/components/BodyPortal";
 import { api, type Money } from "@/components/api";
 import { useI18n } from "@/components/i18n/I18nProvider";
-import { AskAi, openAskAi } from "@/components/AskAi";
-import { ChatPanel } from "@/components/ChatPanel";
+import { openAssistant, usePageAssistant } from "@/components/assistant/AssistantContext";
 import { IconClose, IconSearch, IconSpark } from "@/components/icons";
 import type { MessageKey } from "@/lib/i18n/messages";
 import { ProductThumb, Sparkline } from "@/components/ui";
@@ -175,6 +175,7 @@ function NewProductDrawer({ onClose, onCreated, onAskAi }: { onClose: () => void
   }
 
   return (
+    <BodyPortal>
     <div className="fixed inset-0 z-40" role="dialog" aria-modal="true" aria-labelledby={`${id}-title`}>
       <button type="button" className="absolute inset-0 bg-ink/35" aria-label="Close" onClick={onClose} />
       <form onSubmit={create} className="absolute inset-y-0 right-0 flex w-[min(32rem,100vw)] flex-col overflow-y-auto bg-sheet shadow-[var(--shadow-overlay)]">
@@ -268,6 +269,7 @@ function NewProductDrawer({ onClose, onCreated, onAskAi }: { onClose: () => void
         </footer>
       </form>
     </div>
+    </BodyPortal>
   );
 }
 
@@ -281,6 +283,8 @@ export function ProductsView() {
   const [sort, setSort] = useState<Sort>("newest");
   const [adding, setAdding] = useState(false);
   const [tick, setTick] = useState(0);
+  // The assistant panel opens on the Listing agent in its "new product" conversation; reload the list after it replies (it may have created a product).
+  usePageAssistant({ agent: "LISTING", resumeKey: "new-product", onResult: () => setTick((t) => t + 1) });
   const searchId = useId();
 
   useEffect(() => {
@@ -334,7 +338,7 @@ export function ProductsView() {
         <div className="flex flex-wrap gap-2">
           <button
             type="button"
-            onClick={openAskAi}
+            onClick={() => openAssistant({ agent: "LISTING" })}
             className="inline-flex min-h-11 items-center gap-2 rounded-md bg-assist px-5 font-semibold text-assist-on hover:brightness-110"
           >
             <IconSpark /> Add with AI
@@ -410,14 +414,14 @@ export function ProductsView() {
         </div>
       )}
       {!products && !error && (
-        <ul className="grid gap-4 md:grid-cols-2 xl:grid-cols-3" aria-hidden>
+        <ul className="grid gap-4 cq-md:grid-cols-2 cq-xl:grid-cols-3" aria-hidden>
           {[0, 1, 2].map((i) => (
             <li key={i} className="h-72 rounded-[10px] border border-rule bg-sheet" />
           ))}
         </ul>
       )}
       {shown.length > 0 && (
-        <ul className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+        <ul className="grid gap-4 cq-md:grid-cols-2 cq-xl:grid-cols-3">
           {shown.map((p) => (
             <ProductCard key={p.id} p={p} perf={perf.get(p.id)} />
           ))}
@@ -429,7 +433,7 @@ export function ProductsView() {
           onClose={() => setAdding(false)}
           onAskAi={() => {
             setAdding(false);
-            openAskAi();
+            openAssistant({ agent: "LISTING" });
           }}
           onCreated={() => {
             setAdding(false);
@@ -437,19 +441,6 @@ export function ProductsView() {
           }}
         />
       )}
-
-      <AskAi
-        label="Add a product with AI"
-        hint="Describe it in your own words: what it is, what it costs you and shipping. The assistant creates it, then prices and drafts listings for the markets you pick."
-      >
-        <ChatPanel
-          title="Listing Agent"
-          agent="LISTING"
-          resumeKey="new-product"
-          placeholder='Try: "I make hand-thrown stoneware mugs, 12 oz. Each costs me 18 EUR plus 9 EUR shipping. I want about 40% margin."'
-          onResult={() => setTick((t) => t + 1)}
-        />
-      </AskAi>
     </div>
   );
 }

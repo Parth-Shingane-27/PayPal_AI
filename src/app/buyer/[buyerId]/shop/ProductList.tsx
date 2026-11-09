@@ -122,7 +122,7 @@ export function ProductList({ listings }: { listings: ShopListing[] }) {
       {shown.length === 0 ? (
         <p className="text-ink-3">{t("shop.empty")}</p>
       ) : (
-        <ul className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        <ul className="grid gap-4 bq-sm:grid-cols-2 bq-lg:grid-cols-3">
           {shown.map((l) => (
             <li key={l.listing_id} className="group flex flex-col overflow-hidden rounded-[10px] border border-rule bg-sheet transition-colors hover:border-accent/70">
               {l.image_url && (

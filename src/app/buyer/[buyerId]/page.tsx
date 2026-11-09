@@ -63,7 +63,7 @@ export default async function BuyerJournal() {
       </header>
 
       <section aria-labelledby="passport-title" className="overflow-hidden rounded-[10px] border border-rule bg-accent-soft">
-        <div className="grid gap-6 p-5 md:grid-cols-[17rem_minmax(0,1fr)] md:p-6">
+        <div className="grid gap-6 p-5 bq-md:grid-cols-[17rem_minmax(0,1fr)] md:p-6">
           <div>
             <h2 id="passport-title" className="font-display text-xl font-semibold text-accent-ink">
               {t("passport.title")}
@@ -94,7 +94,7 @@ export default async function BuyerJournal() {
         </div>
       </section>
 
-      <div className="grid gap-6 lg:grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)]">
+      <div className="grid gap-6 bq-lg:grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)]">
         <Panel labelledBy="spend-title">
           <SectionHeading id="spend-title" title={t("spend.title")} aside={t("spend.aside", { currency: o.reference_currency })} />
           <BuyerSpendChart months={o.monthly} currency={o.reference_currency} locale={buyer.market} title={t("spend.title")} />
@@ -133,7 +133,7 @@ export default async function BuyerJournal() {
         <PurchasesGrid pageSize={10} />
       </section>
 
-      <div className="grid gap-6 lg:grid-cols-2">
+      <div className="grid gap-6 bq-lg:grid-cols-2">
         <Panel labelledBy="makers-title">
           <SectionHeading id="makers-title" title={t("makers.title")} />
           <ul className="divide-y divide-rule">

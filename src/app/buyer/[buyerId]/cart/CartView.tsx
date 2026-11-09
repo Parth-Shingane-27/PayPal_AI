@@ -51,10 +51,10 @@ function Parcel({ cart, busy, paypalClientId, onQty, onPaid }: { cart: Cart; bus
         </span>
       </header>
 
-      <div className="grid lg:grid-cols-[minmax(0,1fr)_20rem]">
+      <div className="grid bq-lg:grid-cols-[minmax(0,1fr)_20rem]">
         <ul className="divide-y divide-rule px-5">
           {cart.items.map((i) => (
-            <li key={i.listing_id} className="grid grid-cols-[auto_minmax(0,1fr)] items-center gap-x-4 gap-y-3 py-4 sm:grid-cols-[auto_minmax(0,1fr)_auto_6rem]">
+            <li key={i.listing_id} className="grid grid-cols-[auto_minmax(0,1fr)] items-center gap-x-4 gap-y-3 py-4 bq-sm:grid-cols-[auto_minmax(0,1fr)_auto_6rem]">
               <ProductThumb src={i.image_url} alt="" size={72} />
               <div className="min-w-0">
                 <p className="font-medium leading-snug text-ink">{i.title}</p>
@@ -65,15 +65,15 @@ function Parcel({ cart, busy, paypalClientId, onQty, onPaid }: { cart: Cart; bus
                   {t("cart.remove")}
                 </button>
               </div>
-              <div className="col-start-2 sm:col-start-auto">
+              <div className="col-start-2 bq-sm:col-start-auto">
                 <Stepper title={i.title} quantity={i.quantity} busy={busy} onChange={(q) => onQty(i.listing_id, q)} />
               </div>
-              <p className="num col-start-2 font-display text-lg font-semibold sm:col-start-auto sm:text-right">{i.line_total.display}</p>
+              <p className="num col-start-2 font-display text-lg font-semibold bq-sm:col-start-auto bq-sm:text-right">{i.line_total.display}</p>
             </li>
           ))}
         </ul>
 
-        <aside className="flex flex-col gap-4 border-t border-dashed border-rule-strong bg-sheet-2 px-5 py-5 lg:border-t-0 lg:border-l">
+        <aside className="flex flex-col gap-4 border-t border-dashed border-rule-strong bg-sheet-2 px-5 py-5 bq-lg:border-t-0 bq-lg:border-l">
           <dl className="space-y-1.5 text-sm">
             <div className="flex justify-between gap-3">
               <dt className="text-ink-3">{t("cart.subtotal")}</dt>

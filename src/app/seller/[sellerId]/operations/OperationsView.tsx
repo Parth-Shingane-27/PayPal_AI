@@ -4,9 +4,8 @@ import type { ColDef } from "ag-grid-community";
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { OpsTrendChart } from "@/components/agcharts/Charts";
-import { AskAi } from "@/components/AskAi";
+import { usePageAssistant } from "@/components/assistant/AssistantContext";
 import { api, type Money as MoneyT } from "@/components/api";
-import { ChatPanel } from "@/components/ChatPanel";
 import { FindingsFeed } from "@/components/findings/FindingsFeed";
 import { Grid } from "@/components/grid/Grid";
 import { countryCol, dateCol, marketCol, moneyCol, productCol, statusCol, threadCol } from "@/components/grid/columns";
@@ -113,6 +112,8 @@ export function OperationsView({ period }: { period: DashboardPeriod }) {
   );
 
   const refresh = useCallback(() => setTick((t) => t + 1), []);
+  // The assistant panel talks to the Operations agent here; refresh the orders after it replies (it may have proposed a refund).
+  usePageAssistant({ agent: "OPERATIONS", onResult: refresh });
   const close = useCallback(() => setOpen(null), []);
 
   const attentionCount = s ? s.waiting_threads.length + (s.pending_approvals > 0 ? 1 : 0) + s.anomalies.length : 0;
@@ -147,7 +148,7 @@ export function OperationsView({ period }: { period: DashboardPeriod }) {
         </p>
       )}
 
-      <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)]">
+      <div className="grid items-start gap-6 cq-lg:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)]">
         <section aria-labelledby="attention" className="min-w-0 rounded-[10px] border border-rule bg-sheet p-4 md:p-5">
           <div className="flex items-baseline justify-between gap-2">
             <h2 id="attention" className="font-display text-xl font-semibold">
@@ -272,15 +273,6 @@ export function OperationsView({ period }: { period: DashboardPeriod }) {
           rowHeight={52}
         />
       </section>
-
-      <AskAi label={t("ops.assistant")} hint={t("ops.assistantHint")}>
-        <ChatPanel
-          title="Operations Agent"
-          agent="OPERATIONS"
-          placeholder='Try: "What did I earn in Germany last month?", "Why was my last Japanese order refunded?" or "Anything unusual?"'
-          onResult={refresh}
-        />
-      </AskAi>
 
       <OrderDrawer row={open} onClose={close} onChanged={refresh} />
     </div>

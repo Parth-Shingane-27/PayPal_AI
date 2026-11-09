@@ -468,7 +468,7 @@ export function OpsTrendChart({ weeks, title }: { weeks: TrendWeek[]; title: str
           {t("ops.trend.latest", { rate: latest.refund_rate_bps === null ? "-" : formatBps(latest.refund_rate_bps), n: latest.declined })}
         </p>
       )}
-      <div className="grid gap-6 md:grid-cols-2">
+      <div className="grid gap-6 cq-md:grid-cols-2">
         <div>
           <h3 className="mb-1 text-sm font-semibold text-ink">{t("ops.trend.refundRate")}</h3>
           <AgChart options={rateOptions} height={200} label={`${title}: ${t("ops.trend.refundRate")}`} />

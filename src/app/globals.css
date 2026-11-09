@@ -283,3 +283,90 @@ select:not(.ag-root-wrapper select) {
 select:not(.ag-root-wrapper select):hover {
   border-color: var(--rule-strong);
 }
+
+/*
+ * Assistant side panel.
+ *
+ * --dock-w is the width of the panel column (from 1024px up). It defaults to a
+ * quarter of the screen, with a floor so it stays usable on a small laptop; a
+ * saved width or the collapsed rail overrides it before first paint (see the
+ * inline script in app/layout.tsx and components/assistant/dock-store.ts).
+ */
+:root {
+  --dock-w: max(20rem, 25vw);
+}
+:root[data-dock="closed"] {
+  --dock-w: 3rem;
+}
+/* Before the page hydrates, a collapsed panel (flag set by the inline script) must not show its full contents squeezed into the rail. */
+@media (min-width: 1024px) {
+  :root[data-dock="closed"] .dock-body {
+    display: none;
+  }
+}
+/* Width changes animate (collapse, expand, reset), but not while the handle is being dragged. */
+.dock-grid {
+  transition: grid-template-columns 180ms ease;
+}
+:root[data-dock-dragging] .dock-grid {
+  transition: none;
+}
+:root[data-dock-dragging] {
+  cursor: col-resize;
+  user-select: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .dock-grid {
+    transition: none;
+  }
+}
+
+/*
+ * Container-width variants. The assistant panel narrows the page content, so
+ * layouts that used to switch columns on the screen width must switch on the
+ * width of the content area instead. Each threshold equals the content width the
+ * old screen breakpoint gave, so with the panel closed nothing changes.
+ *   cq-*  seller pages: screen width minus the 15rem sidebar and 2rem padding on each side.
+ *   bq-*  buyer pages: screen width minus 1.5rem padding on each side.
+ * (The content wrapper is the @container; see components/shell/Shell.tsx.)
+ */
+@custom-variant cq-sm {
+  @container (min-width: 464px) {
+    @slot;
+  }
+}
+@custom-variant cq-md {
+  @container (min-width: 464px) {
+    @slot;
+  }
+}
+@custom-variant cq-lg {
+  @container (min-width: 720px) {
+    @slot;
+  }
+}
+@custom-variant cq-xl {
+  @container (min-width: 976px) {
+    @slot;
+  }
+}
+@custom-variant bq-sm {
+  @container (min-width: 608px) {
+    @slot;
+  }
+}
+@custom-variant bq-md {
+  @container (min-width: 720px) {
+    @slot;
+  }
+}
+@custom-variant bq-lg {
+  @container (min-width: 976px) {
+    @slot;
+  }
+}
+@custom-variant bq-xl {
+  @container (min-width: 1232px) {
+    @slot;
+  }
+}

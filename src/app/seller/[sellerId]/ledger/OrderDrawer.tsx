@@ -7,6 +7,7 @@ import { IconClose, IconMessages } from "@/components/icons";
 import { useI18n } from "@/components/i18n/I18nProvider";
 import { RefundForm } from "@/components/RefundForm";
 import { FeeBar, MarketStamp, Money, ProductThumb, StatusStamp } from "@/components/ui";
+import { BodyPortal } from "@/components/BodyPortal";
 import { formatDate, shortId } from "@/lib/format";
 import { useBase } from "@/lib/use-base";
 
@@ -93,6 +94,7 @@ export function OrderDrawer({ row, onClose, onChanged }: { row: DrawerOrder | nu
   const declined = details?.payments.filter((p) => p.status === "DECLINED") ?? [];
 
   return (
+    <BodyPortal>
     <div className="fixed inset-0 z-40" role="dialog" aria-modal="true" aria-labelledby="drawer-title">
       <button type="button" className="absolute inset-0 bg-ink/35" aria-label={t("drawer.closeDetails")} onClick={onClose} />
       <aside className="absolute inset-y-0 right-0 flex w-[min(30rem,100vw)] flex-col overflow-y-auto bg-sheet shadow-[var(--shadow-overlay)]">
@@ -216,5 +218,6 @@ export function OrderDrawer({ row, onClose, onChanged }: { row: DrawerOrder | nu
         </div>
       </aside>
     </div>
+    </BodyPortal>
   );
 }
