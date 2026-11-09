@@ -39,12 +39,19 @@ export const viewport: Viewport = {
 /** Applies the saved theme before first paint so there is no flash. */
 const THEME_SCRIPT = `try{if(localStorage.getItem("gc-theme-v2")==="dark")document.documentElement.dataset.theme="dark"}catch(e){}`;
 
+/**
+ * Applies the saved assistant-panel state before first paint, so the page does not jump when the
+ * panel was left collapsed or resized. Keep the key and shape in step with components/assistant/dock-store.ts.
+ */
+const DOCK_SCRIPT = `try{var d=JSON.parse(localStorage.getItem("gc-dock-v1")||"null"),r=document.documentElement;if(d&&d.open===false)r.dataset.dock="closed";else if(d&&typeof d.width==="number")r.style.setProperty("--dock-w",d.width+"px")}catch(e){}`;
+
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
   const lang = await getUiLang();
   return (
     <html lang={lang} className={`${bricolage.variable} ${hanken.variable}`} suppressHydrationWarning>
       <head>
         <script dangerouslySetInnerHTML={{ __html: THEME_SCRIPT }} />
+        <script dangerouslySetInnerHTML={{ __html: DOCK_SCRIPT }} />
       </head>
       <body>
         <I18nProvider lang={lang}>{children}</I18nProvider>

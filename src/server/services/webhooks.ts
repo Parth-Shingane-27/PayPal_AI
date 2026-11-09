@@ -6,8 +6,9 @@ import {
   payoutBatchId,
   refundFromResource,
 } from "../clients/paypal";
-import { paypalWebhookId } from "../config";
+import { paypalWebhookId, proactiveEnabled } from "../config";
 import { prisma } from "../db";
+import { enqueueWatch } from "../queue";
 import { asJson, paypal as defaultPaypal, SYSTEM, toCallContext } from "./audit";
 import { applyCapture } from "./checkout";
 import { applyBatchResult } from "./payouts";
@@ -57,7 +58,7 @@ export async function storeWebhookEvent(event: WebhookEventBody): Promise<boolea
   return created.count === 1;
 }
 
-type Outcome = { status: "PROCESSED" | "IGNORED"; note?: string };
+type Outcome = { status: "PROCESSED" | "IGNORED"; note?: string; sellerId?: string };
 
 async function handleCapture(resource: unknown): Promise<Outcome> {
   const cap = captureFromResource(resource);
@@ -66,7 +67,7 @@ async function handleCapture(resource: unknown): Promise<Outcome> {
   });
   if (!payment) return { status: "IGNORED", note: `No payment for capture ${cap.captureId}` };
   await applyCapture(payment.id, { ...cap, paypalOrderId: payment.paypal_order_id });
-  return { status: "PROCESSED" };
+  return { status: "PROCESSED", sellerId: payment.seller_id };
 }
 
 async function handleRefund(resource: unknown, reversed: boolean): Promise<Outcome> {
@@ -84,7 +85,7 @@ async function handleRefund(resource: unknown, reversed: boolean): Promise<Outco
         await syncOrderRefundStatus(tx, known.order_id);
       });
     }
-    return { status: "PROCESSED" };
+    return { status: "PROCESSED", sellerId: known.seller_id };
   }
 
   // A refund or reversal made outside GlobalCart: record it so the ledger is right.
@@ -113,7 +114,7 @@ async function handleRefund(resource: unknown, reversed: boolean): Promise<Outco
     });
     await syncOrderRefundStatus(tx, payment.order_id);
   });
-  return { status: "PROCESSED" };
+  return { status: "PROCESSED", sellerId: payment.seller_id };
 }
 
 async function handlePayoutBatch(resource: unknown): Promise<Outcome> {
@@ -121,7 +122,7 @@ async function handlePayoutBatch(resource: unknown): Promise<Outcome> {
   const payout = await prisma.payout.findUnique({ where: { paypal_batch_id: batchId } });
   if (!payout) return { status: "IGNORED", note: `No payout for batch ${batchId}` };
   await applyBatchResult(payout.id, payoutBatchFromResource(resource, payout.currency));
-  return { status: "PROCESSED" };
+  return { status: "PROCESSED", sellerId: payout.seller_id };
 }
 
 /** Processes one stored event. Errors are recorded and rethrown so the job retries. */
@@ -130,16 +131,21 @@ export async function processWebhookEvent(eventId: string): Promise<Outcome | { 
   if (!event || event.status === "PROCESSED" || event.status === "IGNORED") return { status: "SKIPPED" };
   const resource = (event.payload as { resource?: unknown }).resource;
   try {
-    let outcome: Outcome;
+    let handled: Outcome;
     const t = event.event_type;
-    if (t === "PAYMENT.CAPTURE.REFUNDED" || t === "PAYMENT.CAPTURE.REVERSED") outcome = await handleRefund(resource, t.endsWith("REVERSED"));
-    else if (t.startsWith("PAYMENT.CAPTURE.")) outcome = await handleCapture(resource);
-    else if (t.startsWith("PAYMENT.PAYOUTSBATCH.")) outcome = await handlePayoutBatch(resource);
-    else outcome = { status: "IGNORED", note: `Unhandled event type ${t}` };
+    if (t === "PAYMENT.CAPTURE.REFUNDED" || t === "PAYMENT.CAPTURE.REVERSED") handled = await handleRefund(resource, t.endsWith("REVERSED"));
+    else if (t.startsWith("PAYMENT.CAPTURE.")) handled = await handleCapture(resource);
+    else if (t.startsWith("PAYMENT.PAYOUTSBATCH.")) handled = await handlePayoutBatch(resource);
+    else handled = { status: "IGNORED", note: `Unhandled event type ${t}` };
+    const { sellerId, ...outcome } = handled;
     await prisma.webhookEvent.update({
       where: { id: event.id },
       data: { status: outcome.status, error: outcome.note ?? null, processed_at: new Date() },
     });
+    // Proactive agents: look again at this seller soon. Never fail the webhook over it.
+    if (outcome.status === "PROCESSED" && sellerId && proactiveEnabled()) {
+      await enqueueWatch(sellerId).catch((e: unknown) => console.error("[proactive] could not queue a check", e));
+    }
     return outcome;
   } catch (err) {
     await prisma.webhookEvent.update({

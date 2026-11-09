@@ -1,5 +1,5 @@
 import { prisma } from "../db";
-import { allocateByWeight, changeBps, lastMonthKeys, monthKey, ratioBps, weekIndex } from "../domain/analytics";
+import { allocateByWeight, changeBps, lastMonthKeys, monthKey, monthProgress, ratioBps, weekIndex } from "../domain/analytics";
 import { getMarket } from "../domain/markets";
 import { money } from "../domain/money";
 import { convertAtReference } from "../domain/reference-rates";
@@ -333,6 +333,7 @@ export async function sellerOverview(sellerId: string, period: Period, now = new
     const s = sumHome(orders.filter((o) => monthKey(o.at) === key), home);
     return {
       month: key,
+      ...monthProgress(key, now),
       orders: s.orders,
       gross: m(s.gross),
       net: m(s.net),
@@ -354,6 +355,7 @@ export async function sellerOverview(sellerId: string, period: Period, now = new
         region: regionOf(getMarket(locale).country),
         currency: getMarket(locale).currency,
         orders: s.orders,
+        refunded_orders: os.filter((o) => o.refund_debit > 0).length,
         net: m(s.net),
         share_bps: ratioBps(s.net, t.net),
       };
@@ -443,7 +445,7 @@ export async function buyerOverview(buyerId: string, market: string, now = new D
       const g = CURRENCY_GROUPS.includes(o.currency as (typeof CURRENCY_GROUPS)[number]) ? o.currency : "OTHER";
       byGroup[g] = (byGroup[g] ?? 0) + h(o, o.gross - o.refunded);
     }
-    return { month: key, orders: os.length, spent: m(os.reduce((s, o) => s + h(o, o.gross - o.refunded), 0)), spent_by_currency: byGroup };
+    return { month: key, ...monthProgress(key, now), orders: os.length, spent: m(os.reduce((s, o) => s + h(o, o.gross - o.refunded), 0)), spent_by_currency: byGroup };
   });
 
   const bySeller = new Map<string, { seller_id: string; seller: string; country: string; orders: number; spent: number; last: Date }>();
@@ -522,6 +524,31 @@ export async function buyerOverview(buyerId: string, market: string, now = new D
 // --- Seller: operations --------------------------------------------------------------------
 
 /**
+ * Week by week (oldest first, the last one ending now): how many paid orders
+ * were refunded and how many orders ended with a failed payment. Orders count
+ * in the week they were placed or paid, the same date the dashboards use.
+ */
+export async function opsTrend(sellerId: string, weeks = 12, now = new Date()) {
+  const orders = await loadOrders({ seller_id: sellerId });
+  const buckets = Array.from({ length: weeks }, (_, i) => ({
+    week_start: new Date(now.getTime() - (weeks - i) * 7 * DAY).toISOString().slice(0, 10),
+    orders: 0,
+    refunded_orders: 0,
+    declined: 0,
+  }));
+  for (const o of orders) {
+    const i = weekIndex(o.at, now, weeks);
+    const b = i >= 0 ? buckets[i] : undefined;
+    if (!b) continue;
+    if (o.captured) {
+      b.orders += 1;
+      if (o.refund_debit > 0) b.refunded_orders += 1;
+    } else if (o.status === "PENDING_PAYMENT") b.declined += 1;
+  }
+  return { weeks: buckets.map((b) => ({ ...b, refund_rate_bps: b.orders > 0 ? ratioBps(b.refunded_orders, b.orders) : null })) };
+}
+
+/**
  * What needs doing about orders: anomaly checks, buyers waiting on a reply,
  * proposals waiting for approval, and order counts by status for the period.
  */
@@ -542,8 +569,10 @@ export async function operationsSummary(sellerId: string, period: Period, now = 
   for (const o of current) counts[o.status] = (counts[o.status] ?? 0) + 1;
   const refundableOrders = current.filter((o) => o.captured && o.gross - o.refunded > 0).length;
   const severityRank = { high: 0, medium: 1, low: 2 } as const;
+  const trend = await opsTrend(sellerId, 12, now);
   return {
     period: { label: period.label },
+    trend: trend.weeks,
     status_counts: counts,
     refundable_orders: refundableOrders,
     waiting_threads: waiting.map((w) => ({ id: w.id, subject: w.subject, buyer: w.buyer.name })),

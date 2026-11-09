@@ -1,8 +1,9 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import type { Principal } from "@/server/auth";
 import { prisma } from "@/server/db";
-import { buyerOverview, buyerPurchaseRows, sellerOverview, sellerProductRows, sellerSalesRows } from "@/server/services/analytics";
+import { buyerOverview, buyerPurchaseRows, opsTrend, sellerOverview, sellerProductRows, sellerSalesRows } from "@/server/services/analytics";
 import { earningsByMarket, resolvePeriod } from "@/server/services/ledger";
+import { treasuryOverview } from "@/server/services/treasury";
 import { getConversation, listConversations, markRead, sendMessage, startConversation, unreadCount } from "@/server/services/messages";
 import { makeBuyer, makeListing, makePaidOrder, makeProduct, makeSeller, resetDb } from "../helpers/db";
 
@@ -64,6 +65,70 @@ describe("seller analytics", () => {
     expect(rows.rows[0]!.reached_maker.amount_minor).toBe(9100);
     const o = await buyerOverview(w.buyer.id, "en-US");
     expect(o.kpis).toMatchObject({ orders: 1, makers: 1 });
+  });
+});
+
+describe("partial month", () => {
+  it("flags only the current month in the seller and buyer series", async () => {
+    const w = await world();
+    await makePaidOrder(w.seller.id, w.buyer.id, w.listing);
+    const now = new Date();
+    const o = await sellerOverview(w.seller.id, resolvePeriod({ preset: "last_30_days" }), now);
+    const flags = o.monthly.map((m) => m.partial);
+    expect(flags.slice(0, -1).every((f) => f === false)).toBe(true);
+    expect(o.monthly[o.monthly.length - 1]).toMatchObject({ partial: true, days_elapsed: now.getUTCDate() });
+    const b = await buyerOverview(w.buyer.id, "en-US", now);
+    expect(b.monthly[b.monthly.length - 1]!.partial).toBe(true);
+  });
+});
+
+describe("opsTrend", () => {
+  it("counts refunded paid orders and failed payments in the week they happened", async () => {
+    const w = await world();
+    const now = new Date("2026-11-09T12:00:00Z");
+    const DAY = 86_400_000;
+    const thisWeek = await makePaidOrder(w.seller.id, w.buyer.id, w.listing, { capturedAt: new Date(now.getTime() - 2 * DAY) });
+    await makePaidOrder(w.seller.id, w.buyer.id, w.listing, { capturedAt: new Date(now.getTime() - 3 * DAY) });
+    await prisma.refund.create({
+      data: { payment_id: thisWeek.payment.id, order_id: thisWeek.order.id, seller_id: w.seller.id, currency: "USD", amount_minor: 1000, reason: "r", status: "COMPLETED", seller_debit_minor: 900 },
+    });
+    await prisma.order.create({ data: { buyer_id: w.buyer.id, seller_id: w.seller.id, currency: "USD", locale: "en-US", status: "PENDING_PAYMENT", created_at: new Date(now.getTime() - 9 * DAY) } });
+    const old = await makePaidOrder(w.seller.id, w.buyer.id, w.listing, { capturedAt: new Date(now.getTime() - 200 * DAY) });
+    expect(old.order.id).toBeTruthy();
+
+    const { weeks } = await opsTrend(w.seller.id, 12, now);
+    expect(weeks).toHaveLength(12);
+    const last = weeks[11]!;
+    expect(last).toMatchObject({ orders: 2, refunded_orders: 1, refund_rate_bps: 5000, declined: 0 });
+    expect(weeks[10]).toMatchObject({ declined: 1, orders: 0, refund_rate_bps: null });
+    // The order from 200 days ago is outside the 12 weeks.
+    expect(weeks.reduce((s, x) => s + x.orders, 0)).toBe(2);
+  });
+});
+
+describe("treasuryOverview", () => {
+  it("shows how far the available balance is from the fee cap, closest currency first", async () => {
+    const w = await world();
+    // 100.00 USD gross, no fees: far below the USD cap threshold of 1,000.00.
+    await makePaidOrder(w.seller.id, w.buyer.id, w.listing, { paypalFee: 0, platformFee: 0 });
+    const o = await treasuryOverview(w.seller.id, "en-US");
+    const usd = o.cards.find((c) => c.currency === "USD")!;
+    expect(usd).toMatchObject({ cap_reached: false, readiness_bps: 1000 });
+    expect(usd.available.amount_minor).toBe(10000);
+    expect(usd.fee_cap_threshold.amount_minor).toBe(100000);
+    expect(usd.until_cap.amount_minor).toBe(90000);
+    // The payout fee is 2% of the payout, taken from the same balance: payout + fee fits within available.
+    expect(usd.payout_amount.amount_minor + usd.estimated_payout_fee.amount_minor).toBeLessThanOrEqual(10000);
+    expect(o.forecasts.length).toBeGreaterThan(0);
+  });
+
+  it("marks the cap as reached once available covers it", async () => {
+    const w = await world();
+    const big = await makeListing(w.seller.id, (await makeProduct(w.seller.id)).id, { price_minor: 150_000 });
+    await makePaidOrder(w.seller.id, w.buyer.id, big, { paypalFee: 0, platformFee: 0 });
+    const usd = (await treasuryOverview(w.seller.id, "en-US")).cards.find((c) => c.currency === "USD")!;
+    expect(usd).toMatchObject({ cap_reached: true, readiness_bps: 10000 });
+    expect(usd.until_cap.amount_minor).toBe(0);
   });
 });
 

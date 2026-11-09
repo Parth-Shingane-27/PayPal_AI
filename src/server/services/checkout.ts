@@ -1,3 +1,4 @@
+import { buyerPath } from "@/lib/routes";
 import { randomUUID } from "node:crypto";
 import type { Payment } from "@/generated/prisma/client";
 import { type FxApi, frankfurter } from "../clients/frankfurter";
@@ -108,8 +109,8 @@ export async function startCheckout(buyerId: string, orderId: string, audit: Aud
         items: order.items.map((i) => ({ name: i.title, sku: i.sku, quantity: i.quantity, unitMinor: i.unit_price_minor })),
         totalMinor: total,
         locale: order.locale,
-        returnUrl: `${cfg.APP_URL}/checkout/return?order=${order.id}`,
-        cancelUrl: `${cfg.APP_URL}/cart?cancelled=${order.id}`,
+        returnUrl: `${cfg.APP_URL}${buyerPath(buyerId, "checkout/return")}?order=${order.id}`,
+        cancelUrl: `${cfg.APP_URL}${buyerPath(buyerId, "cart")}?cancelled=${order.id}`,
       });
       await tx.payment.create({
         data: {

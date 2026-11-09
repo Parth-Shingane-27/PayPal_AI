@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { compareMoney, formatAge, formatBps, formatChange, moneyCsv } from "@/lib/format";
+import { compareMoney, formatAge, formatBps, formatChange, moneyCsv, shortId } from "@/lib/format";
 import { parseGridState, serializeGridState } from "@/lib/grid-state";
-import { allocateByWeight, changeBps, lastMonthKeys, ratioBps, weekIndex } from "@/server/domain/analytics";
+import { allocateByWeight, changeBps, lastMonthKeys, monthProgress, ratioBps, weekIndex } from "@/server/domain/analytics";
 import { ART_MOTIFS, productArtSvg } from "@/server/domain/product-art";
 import { convertAtReference, referenceRate } from "@/server/domain/reference-rates";
 import { CATALOGUE, BUYER_MARKETS, langOf } from "../../prisma/seed/catalogue";
@@ -9,6 +9,27 @@ import { createRng } from "../../prisma/seed/prng";
 import { SCRIPTS } from "../../prisma/seed/scripts";
 import { isMarketLocale } from "@/server/domain/markets";
 import { SEO_TITLE_MAX } from "@/server/services/catalog";
+
+describe("shortId", () => {
+  it("uses the random tail, because UUIDv7 ids created together share their first characters", () => {
+    const a = "01a1b236-5132-7527-8e5d-25c3d71f6b16";
+    const b = "01a1b236-5133-7a10-9c44-0b7e2d9e41aa";
+    expect(a.slice(0, 8)).toBe(b.slice(0, 8));
+    expect(shortId(a)).toBe("d71f6b16");
+    expect(shortId(a)).not.toBe(shortId(b));
+  });
+});
+
+describe("monthProgress", () => {
+  const now = new Date("2026-11-09T12:00:00Z");
+  it("marks only the current month as partial, with how far through it is", () => {
+    expect(monthProgress("2026-11", now)).toEqual({ partial: true, days_elapsed: 9, days_in_month: 30 });
+    expect(monthProgress("2026-10", now)).toEqual({ partial: false, days_elapsed: 31, days_in_month: 31 });
+  });
+  it("knows leap-year February", () => {
+    expect(monthProgress("2028-02", new Date("2028-03-05T00:00:00Z")).days_in_month).toBe(29);
+  });
+});
 
 describe("allocateByWeight", () => {
   it("splits exactly, including negative totals and zero weights", () => {

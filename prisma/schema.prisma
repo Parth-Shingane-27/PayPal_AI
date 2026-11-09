@@ -83,6 +83,24 @@ enum AgentSessionStatus {
 
 /// TOOL: a tool call (proposals are TOOL rows that wait for approval).
 /// PAYPAL: an outbound PayPal API call. MODEL: token usage for one agent run.
+enum Severity {
+  LOW
+  MEDIUM
+  HIGH
+}
+
+/// NEW: not yet seen. SEEN: seen. SNOOZED: hidden until snoozed_until.
+/// DISMISSED: seller does not want it. ACTED: a proposal was made from it.
+/// RESOLVED: the detector no longer fires.
+enum FindingStatus {
+  NEW
+  SEEN
+  SNOOZED
+  DISMISSED
+  ACTED
+  RESOLVED
+}
+
 enum ActionKind {
   TOOL
   PAYPAL
@@ -116,18 +134,20 @@ enum WebhookStatus {
 // ---------------------------------------------------------------------------
 
 model Seller {
-  id           String   @id @default(uuid(7)) @db.Uuid
-  name         String
-  email        String   @unique
+  id                    String   @id @default(uuid(7)) @db.Uuid
+  name                  String
+  email                 String   @unique
   /// PayPal account that receives payouts.
-  paypal_email String
+  paypal_email          String
   /// ISO 3166-1 alpha-2, used to decide whether a sale is international.
-  country      String   @db.Char(2)
+  country               String   @db.Char(2)
   /// Home currency: a listing in another currency carries a conversion spread.
-  currency     String   @db.Char(3)
+  currency              String   @db.Char(3)
   /// UI and agent reply language, e.g. "en-US", "de-DE".
-  locale       String
-  created_at   DateTime @default(now()) @db.Timestamptz(3)
+  locale                String
+  /// Opt-in: the Treasury agent may draft payout proposals by itself (still approved by the seller).
+  auto_payout_proposals Boolean  @default(false)
+  created_at            DateTime @default(now()) @db.Timestamptz(3)
 
   products         Product[]
   listings         Listing[]
@@ -139,6 +159,7 @@ model Seller {
   agent_sessions   AgentSession[]
   agent_actions    AgentAction[]
   conversations    Conversation[]
+  findings         Finding[]
   market_research  MarketPriceResearch[]
 
   @@map("sellers")
@@ -550,4 +571,34 @@ model WebhookEvent {
 
   @@index([status])
   @@map("webhook_events")
+}
+
+/// A proactive observation by the Treasury or Operations agent. One open row
+/// per (seller_id, fingerprint); see the partial unique index in the migration.
+model Finding {
+  id            String        @id @default(uuid(7)) @db.Uuid
+  seller_id     String        @db.Uuid
+  agent         AgentName
+  type          String
+  /// type:subject, e.g. refund_rate:de-DE. Stable across runs.
+  fingerprint   String
+  severity      Severity
+  title         String
+  body          String
+  evidence      Json
+  status        FindingStatus @default(NEW)
+  snoozed_until DateTime?     @db.Timestamptz(3)
+  /// Agent session that wrote it, so "Discuss" continues the same conversation.
+  session_id    String?       @db.Uuid
+  /// Payout proposal drafted from this finding, if any.
+  action_id     String?       @db.Uuid
+  first_seen_at DateTime      @default(now()) @db.Timestamptz(3)
+  last_seen_at  DateTime      @default(now()) @db.Timestamptz(3)
+  created_at    DateTime      @default(now()) @db.Timestamptz(3)
+
+  seller Seller @relation(fields: [seller_id], references: [id])
+
+  @@index([seller_id, status])
+  @@index([seller_id, fingerprint])
+  @@map("findings")
 }

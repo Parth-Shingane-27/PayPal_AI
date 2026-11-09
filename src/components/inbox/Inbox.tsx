@@ -5,6 +5,7 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { formatAge, formatDate } from "@/lib/format";
 import type { MessageKey } from "@/lib/i18n/messages";
+import { useBase } from "@/lib/use-base";
 import { api, type Money as MoneyT } from "../api";
 import { useI18n } from "../i18n/I18nProvider";
 import { IconBack, IconSend } from "../icons";
@@ -136,9 +137,9 @@ export function Inbox({ role }: { role: "SELLER" | "BUYER" }) {
         </p>
       )}
 
-      <div className="grid min-h-[34rem] overflow-hidden rounded-[10px] border border-rule bg-sheet md:grid-cols-[21rem_minmax(0,1fr)]">
+      <div className="grid min-h-[34rem] overflow-hidden rounded-[10px] border border-rule bg-sheet @min-[600px]:grid-cols-[21rem_minmax(0,1fr)]">
         {/* Thread list */}
-        <section aria-label={t("msg.conversations")} className={`flex min-h-0 flex-col border-rule md:border-r ${selectedId ? "hidden md:flex" : "flex"}`}>
+        <section aria-label={t("msg.conversations")} className={`flex min-h-0 flex-col border-rule @min-[600px]:border-r ${selectedId ? "hidden @min-[600px]:flex" : "flex"}`}>
           <div className="flex items-center gap-1 border-b border-rule p-2" role="group" aria-label={t("msg.show")}>
             {(["all", "unread"] as const).map((f) => (
               <button
@@ -152,7 +153,7 @@ export function Inbox({ role }: { role: "SELLER" | "BUYER" }) {
               </button>
             ))}
           </div>
-          <ul className="min-h-0 flex-1 divide-y divide-rule overflow-y-auto md:max-h-[40rem]">
+          <ul className="min-h-0 flex-1 divide-y divide-rule overflow-y-auto @min-[600px]:max-h-[40rem]">
             {threads === null && <li className="p-4 text-sm text-ink-3">{t("msg.loading")}</li>}
             {threads !== null && shown.length === 0 && (
               <li className="p-4 text-sm text-ink-3">
@@ -197,7 +198,7 @@ export function Inbox({ role }: { role: "SELLER" | "BUYER" }) {
         </section>
 
         {/* Conversation */}
-        <section aria-label={t("msg.conversation")} className={`min-h-0 flex-col ${selectedId ? "flex" : "hidden md:flex"}`}>
+        <section aria-label={t("msg.conversation")} className={`min-h-0 flex-col ${selectedId ? "flex" : "hidden @min-[600px]:flex"}`}>
           {!selectedId && (
             <div className="m-auto max-w-sm p-8 text-center text-ink-3">
               <p className="font-display text-lg text-ink">{t("msg.pick")}</p>
@@ -217,10 +218,11 @@ export function Inbox({ role }: { role: "SELLER" | "BUYER" }) {
 
 function ThreadView({ thread, now, onBack, onSent }: { thread: Thread; now: number | null; onBack: () => void; onSent: (m: Message) => void }) {
   const { t, locale } = useI18n();
+  const base = useBase();
   const other = thread.viewer === "SELLER" ? thread.buyer : thread.seller;
   const me = thread.viewer === "SELLER" ? thread.seller : thread.buyer;
   const endRef = useRef<HTMLDivElement>(null);
-  const productHref = thread.product ? (thread.viewer === "SELLER" ? `/seller/products/${thread.product.id}` : "/shop") : null;
+  const productHref = thread.product ? (thread.viewer === "SELLER" ? `${base}/products/${thread.product.id}` : `${base}/shop`) : null;
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ block: "end" });
@@ -229,7 +231,7 @@ function ThreadView({ thread, now, onBack, onSent }: { thread: Thread; now: numb
   return (
     <>
       <header className="flex flex-wrap items-center gap-3 border-b border-rule px-4 py-3">
-        <button type="button" onClick={onBack} className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-md hover:bg-sheet-2 md:hidden">
+        <button type="button" onClick={onBack} className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-md hover:bg-sheet-2 @min-[600px]:hidden">
           <IconBack />
           <span className="sr-only">{t("msg.back")}</span>
         </button>
@@ -270,7 +272,7 @@ function ThreadView({ thread, now, onBack, onSent }: { thread: Thread; now: numb
         </div>
       )}
 
-      <ol className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto px-4 py-5 md:max-h-[30rem]" aria-label={t("msg.with", { name: other.name })}>
+      <ol className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto px-4 py-5 @min-[600px]:max-h-[30rem]" aria-label={t("msg.with", { name: other.name })}>
         {thread.messages.map((m) => (
           <li key={m.id} className={`flex flex-col ${m.from_me ? "items-end" : "items-start"}`}>
             <div className={`max-w-[min(34rem,88%)] rounded-[10px] px-3.5 py-2.5 ${m.from_me ? "rounded-br-[3px] bg-accent text-sheet" : "rounded-bl-[3px] border border-rule bg-paper text-ink"}`}>

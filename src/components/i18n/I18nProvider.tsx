@@ -32,7 +32,7 @@ export function LanguagePicker({ compact = false }: { compact?: boolean }) {
           document.documentElement.lang = e.target.value;
           start(() => router.refresh());
         }}
-        className="min-h-10 rounded-md border border-rule bg-sheet px-2 text-ink hover:border-rule-strong disabled:opacity-60"
+        className="min-h-10 rounded-md border border-rule bg-sheet pl-3 text-ink hover:border-rule-strong disabled:opacity-60"
       >
         {UI_LANGS.map((l) => (
           <option key={l.code} value={l.code} lang={l.code}>

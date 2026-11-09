@@ -9,7 +9,7 @@ See [ps.md](ps.md) for the problem statement and [architecture.md](architecture.
 - **Code computes.** Every price, fee, exchange rate, balance, forecast and anomaly comes from deterministic code behind a tool. Tool results carry money as integer minor units plus a `display` string; prompts require agents to quote only those strings.
 - **Agents only propose money movement.** No tool captures, refunds or pays out. A payment is approved by the buyer's click in PayPal and captured by a normal API route. Refunds and payouts are written as `PENDING_APPROVAL` proposals that a seller approves on `/seller/approvals`, through a route no tool can reach.
 - **Identity comes from the session.** Tool inputs never contain seller, buyer or locale. The runtime injects the actor and market from the signed session cookie, and every service filters by owner, so another tenant's id reads as "not found".
-- **Everything is audited.** Every tool call, PayPal call and agent run writes an `agent_actions` row, shown as a timeline on `/seller/activity` and beside every chat.
+- **Everything is audited.** Every tool call, PayPal call and agent run writes an `agent_actions` row, shown as a timeline on `/seller/<sellerId>/activity` and beside every chat.
 
 ## Stack
 
@@ -39,7 +39,7 @@ Keys in `.env` (each is checked only when that integration is used):
 | `PAYPAL_CLIENT_ID`, `PAYPAL_CLIENT_SECRET` | checkout, refunds, payouts (sandbox REST app) |
 | `PAYPAL_WEBHOOK_ID` | webhook signature verification (worker) |
 
-Optional: `GROQ_SEARCH_MODEL` (market price research with Groq's built-in `browser_search`; default `openai/gpt-oss-20b`), `GROQ_AGENT_MODEL` (default `openai/gpt-oss-120b`), `GROQ_AGENT_REASONING_EFFORT` (`low` / `medium` / `high`, default `medium`), `GROQ_MODEL` (routing; default `openai/gpt-oss-20b`; must support strict structured outputs), `GROQ_REASONING_EFFORT` (default `low`), `PLATFORM_FEE_BPS` (default 500), `SEED_US_PAYOUT_EMAIL` / `SEED_DE_PAYOUT_EMAIL` (sandbox personal accounts that receive seller payouts). Demo login is always on outside production; set `DEMO_LOGIN=true` to allow it under `next start`.
+Optional: `GROQ_SEARCH_MODEL` (market price research with Groq's built-in `browser_search`; default `openai/gpt-oss-20b`), `GROQ_AGENT_MODEL` (default `openai/gpt-oss-120b`), `GROQ_AGENT_REASONING_EFFORT` (`low` / `medium` / `high`, default `medium`), `GROQ_MODEL` (routing; default `openai/gpt-oss-20b`; must support strict structured outputs), `GROQ_REASONING_EFFORT` (default `low`), `PLATFORM_FEE_BPS` (default 500), `PROACTIVE_AGENTS=off` (turns the automatic Treasury and Operations checks off), `SEED_US_PAYOUT_EMAIL` / `SEED_DE_PAYOUT_EMAIL` (sandbox personal accounts that receive seller payouts). Demo login is always on outside production; set `DEMO_LOGIN=true` to allow it under `next start`.
 
 When you add `VOYAGE_API_KEY`, restart the worker: on boot it re-queues embeddings for every published listing that has none.
 
@@ -67,12 +67,16 @@ API: `GET/POST /api/products/:id/market-prices` (`{markets, refresh}`), `POST /a
 
 ## Dashboards
 
-- **Seller overview** (`/seller`): KPIs against the previous period, the "where every sale went" fee anatomy, net earnings by month, markets, best sellers and buyers waiting on a reply. Totals in the seller's home currency use fixed reference rates (`src/server/domain/reference-rates.ts`); every sale keeps its own currency.
-- **Sales ledger** (`/seller/ledger`): AG Grid Community with Sales, Products, Buyers and Markets tabs. Quick filter, column filters, column chooser, CSV export, saved layout, pinned totals row, and an order drawer with the money trail.
-- **Messages** (`/seller/messages`, `/buyer/messages`): live buyer-seller threads. Seeded messages carry a translation into the other party's language; buyers start threads with "Ask the maker" in the shop.
-- **Buyer journal** (`/buyer`): passport of countries bought from, spending by month, purchases grid with how much reached the maker, and suggestions from the buyer's market.
+- **Seller overview** (`/seller/<sellerId>`): KPIs against the previous period, the "where every sale went" fee anatomy, net earnings by month, markets, best sellers and buyers waiting on a reply. Totals in the seller's home currency use fixed reference rates (`src/server/domain/reference-rates.ts`); every sale keeps its own currency.
+- **Sales ledger** (`/seller/<sellerId>/ledger`): AG Grid Community with Sales, Products, Buyers and Markets tabs. Quick filter, column filters, column chooser, CSV export, saved layout, pinned totals row, and an order drawer with the money trail.
+- **Messages** (`/seller/<sellerId>/messages`, `/buyer/<buyerId>/messages`): live buyer-seller threads. Seeded messages carry a translation into the other party's language; buyers start threads with "Ask the maker" in the shop.
+- **Buyer journal** (`/buyer/<buyerId>`): passport of countries bought from, spending by month, purchases grid with how much reached the maker, and suggestions from the buyer's market.
 
 Seed data is deterministic (`prisma/seed/`). Only the original US/DE listings are queued for embeddings; run `SEED_EMBED=all npm run db:seed` to embed everything.
+
+## Addresses
+
+Every signed-in page lives at the account's own address: `/seller/<sellerId>/…` for sellers (overview, ledger, messages, products, treasury, operations, approvals, activity, assistant) and `/buyer/<buyerId>/…` for buyers (journal, shop, cart, orders, messages, checkout/return). The id in the address only names the account; the signed session decides access, and an address with someone else's id is a 404. Older shared addresses (`/seller/ledger`, `/shop`, a PayPal return link saved earlier) redirect to the signed-in account's own address (`src/proxy.ts`).
 
 ## How it fits together
 
@@ -86,16 +90,28 @@ Worker (Fastify + BullMQ): POST /webhooks/paypal → verify → store once → q
 
 - `src/server/domain` — pure maths: markets, money, fee estimate table, pricing and rounding.
 - `src/server/services` — everything that touches the database or PayPal; each function checks ownership.
-- `src/server/agents` — `runtime.ts` (the hand-written agent loop), `model.ts` (the Groq client), `tool.ts` (`defineTool`, zod → JSON schema), `tools/*` (22 tools + `handoff`), `prompts.ts`, `orchestrator.ts`, `router.ts` (Groq structured-output classifier), `sessions.ts` (locking, append-only history).
+- `src/server/agents` — one folder per agent (`listing/`, `shopping/`, `treasury/`, `operations/`; see below), plus the shared engine as flat files: `runtime.ts` (the hand-written agent loop), `model.ts` (the Groq client), `tool.ts` (`defineTool`, zod → JSON schema), `shared-tools.ts` (`handoff` and tool helpers), `shared-rules.ts` (prompt rules every agent includes), `registry.ts`, `orchestrator.ts`, `router.ts` + `router-prompt.ts` (Groq structured-output classifier), `sessions.ts` (locking, append-only history).
 - `worker/` — webhook server and job processors.
 - `scripts/eval.ts` — live evaluation.
 
 ### The agents
 
+Each agent lives in its own folder under `src/server/agents/`, and **every agent folder must have a `system-prompt.ts`** (exporting `SYSTEM_PROMPT`):
+
+```
+agents/<agent>/
+  system-prompt.ts      the agent's prompt (required)
+  tools.ts              its tools
+  index.ts              its spec: prompt + tools + run limits
+  proactive-prompt.ts   Treasury and Operations only: the prompt for automatic checks
+```
+
+`tests/unit/agent-layout.test.ts` fails if `agents/` gains any other folder, or an agent folder loses one of these files. Prompt blocks shared by several agents live in `shared-rules.ts`.
+
 | Agent | Reached from | Tools |
 |---|---|---|
 | Listing | product editor | get_product, preview_product, create_product, list_markets, market_overview, research_market_prices, get_fx_rate, suggest_price, save_listing_draft, reprice_listing, handoff |
-| Shopping | `/shop` (buyers only) | search_products, compare_products, add_to_cart, update_cart, view_cart, create_paypal_order |
+| Shopping | `/buyer/<buyerId>/shop` (buyers only) | search_products, compare_products, add_to_cart, update_cart, view_cart, create_paypal_order |
 | Treasury | treasury screen | get_balances, estimate_fees, forecast_earnings, compare_selling_direct, propose_payout_schedule, handoff |
 | Operations | operations screen | query_orders, get_order_details, get_payment_status, earnings_by_market, detect_anomalies, propose_refund, handoff |
 
@@ -111,8 +127,38 @@ Groq usage, as implemented in `runtime.ts`:
   - `length` with a tool call: the call is never run; one retry at 32k output tokens, then a graceful failure.
   - A response with no answer: treated as a refusal; no tools run and the user gets a polite message.
   - Groq's `tool_use_failed` (HTTP 400 for a malformed tool call): one retry, then a graceful failure.
+- **Streaming:** in the chat, each model call is made with `stream: true`; `collectStream` (`model.ts`) reads the stream and still returns a normal completion, so the loop is unchanged. Reply text is sent to the browser as `text_delta` events on the existing SSE channel, and the final `result` always carries the complete reply. Background runs (proactive checks) pass no listener and are not streamed. A streamed `tool_use_failed` error is turned back into the 400 the loop retries on.
+- **Reply formatting:** replies are rendered by `src/components/Markdown.tsx` (tables, bold, lists, code, links) from a parser in `src/lib/markdown.ts` that builds React elements only, never HTML, and only allows web, mail and in-app links.
 - **Errors:** Groq's typed errors (429, 401/403, 400, 5xx) and network failures become readable replies.
 - **Limits:** 15 model calls per message (Listing: 40), a timeout per run, 4000 characters per message, and one run per session at a time.
+
+### The assistant panel
+
+Every chat lives in one side panel (`src/components/assistant/`), mounted once in the shell for sellers and buyers.
+
+- **Layout.** From 1024px up it is a column beside the page, a quarter of the screen wide by default (never under 20rem). Drag its left edge, or focus the handle and use the arrow keys (Shift for bigger steps, Home and End for the limits, Enter or a double-click to reset), to resize it between 280px and half the screen. The collapse button folds it to a 3rem rail. Width and open state are remembered in the browser (`gc-dock-v1`) and applied before first paint. Below 1024px it is a sheet that opens from a floating button and does not touch the layout.
+- **Which agent.** It follows the page (Treasury, Operations, a product's editor, the buyer shop) and falls back to the routing Assistant; a switcher in the header changes agent, and each agent keeps its own conversation. A page can say more with `usePageAssistant({ agent, productId, resumeKey, contextLabel, onResult })`, where `onResult` refreshes the page after a reply. `openAssistant({ agent, sessionId })` opens the panel from anywhere (the findings' Discuss button, "Add with AI").
+- **Content area is a container.** Layouts that used to switch columns on the screen width switch on the width of the content area instead, so the panel can take space without cramping them. Use `cq-sm|md|lg|xl:` on seller pages and `bq-*:` on buyer pages (defined in `globals.css`; each threshold equals the content width the old screen breakpoint gave). Overlays that must cover the whole screen render through `BodyPortal`, because a container is the reference box for `position: fixed` inside it.
+
+### Proactive Treasury and Operations
+
+The Treasury and Operations agents also work without being asked. Rules decide *when*; the model only explains.
+
+```
+triggers (webhook event, daily schedule, "Check now")
+  -> detectors: plain code over the ledger and orders, no model
+  -> findings table, one open row per rule + subject (dedupe by fingerprint)
+  -> for each NEW finding: the matching agent verifies it with its read tools and writes a short headline + 3 sentences
+  -> feed on the overview, Treasury and Operations pages, nav badge, Discuss / Snooze / Dismiss
+```
+
+- **Detectors** (`src/server/proactive/detectors/`). Operations: the existing anomaly rules, refund-rate spike, earnings drop, stuck unpaid orders, proposals waiting for approval. Treasury: payout ready (balance has reached the payout-fee cap), idle balance, FX cost above the normal spread, forecast shift. Thresholds live in `thresholds.ts`.
+- **Quiet by design.** One finding per rule and subject; a dismissed one stays hidden while its rule keeps firing; a snoozed one returns when the snooze ends; one that stops firing resolves itself. Fee spikes, idle balances and forecast shifts are each reported once per seller, not once per order or currency.
+- **No new way to move money.** Operations never gets `propose_refund` in an automatic check. Treasury gets `propose_payout_schedule` only when the seller switches on "Let Treasury draft payout proposals" (off by default), and the proposal waits on the Approvals page like any other.
+- **Degraded mode.** If the model is down, rate-limited (one retry) or has no key, the finding is still saved with the rule's own English sentence.
+- **Cost controls.** At most 6 agent runs per seller per UTC day, one run at a time, and `PROACTIVE_AGENTS=off` turns the whole thing off.
+- **Triggers.** `processWebhookEvent` queues a check after a capture, refund, reversal or payout event (one per seller per 10 minutes). The worker schedules a daily check per seller at boot, so restart it after adding sellers. "Check now" queues one immediately.
+- **Discuss** opens the agent's chat on the conversation that wrote the finding.
 
 ### Fees and the ledger
 
@@ -135,11 +181,11 @@ One-time sandbox setup in the PayPal developer dashboard:
 
 Then walk the flow (worker and app running):
 1. **List.** Log in at `/login` as *Maple & Pine Goods*. Open a product and ask the Listing Agent: *"Localize this for Germany, Japan and India."* Check the per-market table, then click **Publish** on each draft. Within a few seconds the worker embeds them ("indexing for search" disappears).
-2. **Shop in Hindi.** Sign out and log in as *Priya Sharma* (market hi-IN). On `/shop`, ask: *"मुझे लकड़ी का सर्विंग बोर्ड चाहिए, एक कार्ट में डालो और भुगतान शुरू करो।"* The agent searches, adds the item after you confirm, and calls `create_paypal_order`. A PayPal button appears in the chat.
+2. **Shop in Hindi.** Sign out and log in as *Priya Sharma* (market hi-IN). On the shop page, ask: *"मुझे लकड़ी का सर्विंग बोर्ड चाहिए, एक कार्ट में डालो और भुगतान शुरू करो।"* The agent searches, adds the item after you confirm, and calls `create_paypal_order`. A PayPal button appears in the chat.
 3. **Pay.** Click the PayPal button and approve with the sandbox buyer account. The capture route records the payment with PayPal's actual fee. `/orders` shows it as PAID, and the chat's activity panel shows the `paypal.orders.create` and `paypal.orders.capture` calls. The redirect flow (the link under the button, returning to `/checkout/return`) works too, and so does paying from `/cart`.
-4. **Refund.** Log in as the seller and open Operations. Ask the agent to refund that order. A proposal appears on `/seller/approvals`. Click **Approve**: PayPal processes the refund, and the outcome and seller debit show on the card. Clicking Approve again changes nothing.
+4. **Refund.** Log in as the seller and open Operations. Ask the agent to refund that order. A proposal appears on `/seller/<sellerId>/approvals`. Click **Approve**: PayPal processes the refund, and the outcome and seller debit show on the card. Clicking Approve again changes nothing.
 5. **Pay out.** On Treasury, ask *"How much can I withdraw?"* and then *"Pay it out now."* Approve the schedule. The worker sends the payout (`sender_batch_id` is the idempotency key) and polls until PayPal finishes. The payout shows SUCCESS with PayPal's actual fee, and the `PAYMENT.PAYOUTSBATCH.SUCCESS` webhook is processed.
-6. **Audit.** `/seller/activity` lists every tool call, PayPal call and model run, with inputs, outputs, durations and token usage.
+6. **Audit.** `/seller/<sellerId>/activity` lists every tool call, PayPal call and model run, with inputs, outputs, durations and token usage.
 
 ## Live evaluation
 
@@ -163,4 +209,5 @@ The script prints pass/fail per case, token usage per model and the estimated co
 - Payouts are one item per batch. A batch item that ends `UNCLAIMED` (receiver has no PayPal account) counts as sent.
 - Market price research is token-heavy: one market's web search sends roughly 30k–90k input tokens (search results and opened pages). Groq's free tier allows 200k tokens per model per day, so expect only a few market checks a day on it. When the daily cap is reached, the panel says so and pricing falls back to cost and margin. Observed shop prices may include VAT and exclude shipping; they are a guide, not a guarantee.
 - Groq's free tier allows 8,000 tokens per minute per model. One agent step sends about 2,200 tokens, so a busy chat waits for the limit to reset. The paid Developer tier removes this wait. The buttons on each page (create listings, add to cart, pay, refund, pay out) use no AI or a single short call.
+- Automatic findings are written in the seller's language by the model; the fallback sentence used when the model is unavailable is English only.
 - AG Grid, Bryntum, next-intl UI translation and PayPal's marketplace/partner split are out of scope for this build.
