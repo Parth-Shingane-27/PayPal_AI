@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { sendMessage } from "@/server/agents/orchestrator";
-import { ROUTER_PROMPT } from "@/server/agents/prompts";
+import { ROUTER_PROMPT } from "@/server/agents/router-prompt";
 import { AGENTS } from "@/server/agents/registry";
 import { historyOf } from "@/server/agents/sessions";
 import { toChatTools } from "@/server/agents/tool";

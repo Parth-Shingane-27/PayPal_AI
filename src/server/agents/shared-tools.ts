@@ -1,6 +1,6 @@
 import { z } from "zod";
-import { AppError } from "../../errors";
-import { defineTool, type ToolCtx } from "../tool";
+import { AppError } from "../errors";
+import { defineTool, type ToolCtx } from "./tool";
 
 /** The seller id from the session; seller tools never take it as input. */
 export function sellerOf(ctx: ToolCtx): string {

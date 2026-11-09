@@ -64,3 +64,31 @@ export function approvalView(a: ApprovalRow, locale: string) {
       : null,
   };
 }
+
+export function findingView(f: {
+  id: string;
+  agent: string;
+  type: string;
+  severity: string;
+  title: string;
+  body: string;
+  status: string;
+  session_id: string | null;
+  action_id: string | null;
+  last_seen_at: Date;
+  first_seen_at: Date;
+}) {
+  return {
+    id: f.id,
+    agent: f.agent,
+    type: f.type,
+    severity: f.severity,
+    title: f.title,
+    body: f.body,
+    status: f.status,
+    session_id: f.session_id,
+    action_id: f.action_id,
+    first_seen_at: f.first_seen_at.toISOString(),
+    last_seen_at: f.last_seen_at.toISOString(),
+  };
+}

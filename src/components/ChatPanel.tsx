@@ -26,6 +26,8 @@ type Entry =
   | { kind: "assistant"; text: string; agent?: AgentName; turn?: Turn }
   | { kind: "notice"; text: string; tone: "info" | "error" };
 
+export const RESUME_EVENT = "gc:resume-chat";
+
 const AGENT_LABEL: Record<AgentName, string> = { LISTING: "Listing", SHOPPING: "Shopping", TREASURY: "Money", OPERATIONS: "Operations" };
 
 /** What each tool does, in plain words, for the progress list while the assistant works. */
@@ -161,6 +163,20 @@ export function ChatPanel(props: {
       setEntries([]);
     });
   }, [storageKey, loadSession]);
+
+  // "Discuss" on a finding: continue the conversation that wrote it.
+  const agentProp = props.agent;
+  useEffect(() => {
+    const onResume = (e: Event) => {
+      const d = (e as CustomEvent<{ agent: string; sessionId: string }>).detail;
+      if (!d || d.agent !== agentProp) return;
+      setSessionId(d.sessionId);
+      writeStored(storageKey, d.sessionId);
+      loadSession(d.sessionId, true).catch(() => undefined);
+    };
+    window.addEventListener(RESUME_EVENT, onResume);
+    return () => window.removeEventListener(RESUME_EVENT, onResume);
+  }, [agentProp, storageKey, loadSession]);
 
   useEffect(() => {
     bottom.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });

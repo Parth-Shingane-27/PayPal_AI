@@ -6,6 +6,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { AskAi } from "@/components/AskAi";
 import { api, type Money as MoneyT } from "@/components/api";
 import { ChatPanel } from "@/components/ChatPanel";
+import { FindingsFeed } from "@/components/findings/FindingsFeed";
 import { Grid } from "@/components/grid/Grid";
 import { countryCol, dateCol, marketCol, moneyCol, productCol, statusCol, threadCol } from "@/components/grid/columns";
 import { IconCheck, IconMessages, IconPulse } from "@/components/icons";
@@ -133,6 +134,8 @@ export function OperationsView({ period }: { period: DashboardPeriod }) {
           ))}
         </nav>
       </header>
+
+      <FindingsFeed agent="OPERATIONS" />
 
       {error && (
         <p role="alert" className="rounded-md bg-alert-soft p-3 text-sm text-alert-ink">

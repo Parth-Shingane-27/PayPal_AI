@@ -4,6 +4,8 @@ import { useEffect, useState } from "react";
 import { api, type Money } from "@/components/api";
 import { AskAi } from "@/components/AskAi";
 import { ChatPanel } from "@/components/ChatPanel";
+import { AutoProposalsToggle } from "@/components/findings/AutoProposalsToggle";
+import { FindingsFeed } from "@/components/findings/FindingsFeed";
 
 type Balance = { currency: string; earned: Money; refunded: Money; paid_out: Money; reserved_for_scheduled_payouts: Money; available: Money };
 type MarketRow = { market: string; currency: string; orders: number; gross_sales: Money; paypal_fees: Money; platform_fees: Money; fx_costs: Money; net_earnings: Money; refund_debits: Money; net_after_refunds: Money };
@@ -46,6 +48,8 @@ export default function TreasuryPage() {
   const cell = "p-2 text-right";
   return (
     <div className="space-y-6">
+      <FindingsFeed agent="TREASURY" />
+      <AutoProposalsToggle />
       <section>
         <h1 className="mb-2 text-xl font-semibold">Balances</h1>
         {notice && <p className={`mb-2 rounded p-2 text-sm ${notice.tone === "ok" ? "bg-positive-soft text-positive-ink" : "bg-red-50 text-red-800"}`}>{notice.text}</p>}

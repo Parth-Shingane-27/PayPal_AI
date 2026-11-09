@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { MarketRegionChart, SellerMonthlyChart } from "@/components/agcharts/Charts";
 import { FeeAnatomy } from "@/components/charts";
+import { FindingsFeed } from "@/components/findings/FindingsFeed";
 import { IconArrowDown, IconArrowUp } from "@/components/icons";
 import { PeriodPicker } from "@/components/PeriodPicker";
 import { parseDashboardPeriod } from "@/lib/periods";
@@ -79,6 +80,8 @@ export default async function SellerOverview({ searchParams }: { searchParams: P
         </div>
         <PeriodPicker current={periodKey} basePath={base} />
       </header>
+
+      <FindingsFeed />
 
       <dl className="grid gap-px overflow-hidden rounded-[10px] border border-rule bg-rule sm:grid-cols-2 lg:grid-cols-5">
         <Figure label={t("kpi.net")} value={k.net.display}>

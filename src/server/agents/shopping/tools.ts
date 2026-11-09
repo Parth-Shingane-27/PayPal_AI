@@ -3,7 +3,7 @@ import { addToCart, MAX_QUANTITY, updateCart, viewCart } from "../../services/ca
 import { startCheckout } from "../../services/checkout";
 import { publishedListingFacts, searchListings } from "../../services/search";
 import { defineTool } from "../tool";
-import { buyerOf, uuid } from "./common";
+import { buyerOf, uuid } from "../shared-tools";
 
 const searchProductsTool = defineTool({
   name: "search_products",

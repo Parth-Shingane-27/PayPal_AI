@@ -39,7 +39,7 @@ Keys in `.env` (each is checked only when that integration is used):
 | `PAYPAL_CLIENT_ID`, `PAYPAL_CLIENT_SECRET` | checkout, refunds, payouts (sandbox REST app) |
 | `PAYPAL_WEBHOOK_ID` | webhook signature verification (worker) |
 
-Optional: `GROQ_AGENT_MODEL` (default `openai/gpt-oss-120b`), `GROQ_AGENT_REASONING_EFFORT` (`low` / `medium` / `high`, default `medium`), `GROQ_MODEL` (routing; default `openai/gpt-oss-20b`; must support strict structured outputs), `GROQ_REASONING_EFFORT` (default `low`), `PLATFORM_FEE_BPS` (default 500), `SEED_US_PAYOUT_EMAIL` / `SEED_DE_PAYOUT_EMAIL` (sandbox personal accounts that receive seller payouts). Demo login is always on outside production; set `DEMO_LOGIN=true` to allow it under `next start`.
+Optional: `GROQ_AGENT_MODEL` (default `openai/gpt-oss-120b`), `GROQ_AGENT_REASONING_EFFORT` (`low` / `medium` / `high`, default `medium`), `GROQ_MODEL` (routing; default `openai/gpt-oss-20b`; must support strict structured outputs), `GROQ_REASONING_EFFORT` (default `low`), `PLATFORM_FEE_BPS` (default 500), `PROACTIVE_AGENTS=off` (turns the automatic Treasury and Operations checks off), `SEED_US_PAYOUT_EMAIL` / `SEED_DE_PAYOUT_EMAIL` (sandbox personal accounts that receive seller payouts). Demo login is always on outside production; set `DEMO_LOGIN=true` to allow it under `next start`.
 
 When you add `VOYAGE_API_KEY`, restart the worker: on boot it re-queues embeddings for every published listing that has none.
 
@@ -78,11 +78,23 @@ Worker (Fastify + BullMQ): POST /webhooks/paypal → verify → store once → q
 
 - `src/server/domain` — pure maths: markets, money, fee estimate table, pricing and rounding.
 - `src/server/services` — everything that touches the database or PayPal; each function checks ownership.
-- `src/server/agents` — `runtime.ts` (the hand-written agent loop), `model.ts` (the Groq client), `tool.ts` (`defineTool`, zod → JSON schema), `tools/*` (22 tools + `handoff`), `prompts.ts`, `orchestrator.ts`, `router.ts` (Groq structured-output classifier), `sessions.ts` (locking, append-only history).
+- `src/server/agents` — one folder per agent (`listing/`, `shopping/`, `treasury/`, `operations/`; see below), plus the shared engine as flat files: `runtime.ts` (the hand-written agent loop), `model.ts` (the Groq client), `tool.ts` (`defineTool`, zod → JSON schema), `shared-tools.ts` (`handoff` and tool helpers), `shared-rules.ts` (prompt rules every agent includes), `registry.ts`, `orchestrator.ts`, `router.ts` + `router-prompt.ts` (Groq structured-output classifier), `sessions.ts` (locking, append-only history).
 - `worker/` — webhook server and job processors.
 - `scripts/eval.ts` — live evaluation.
 
 ### The agents
+
+Each agent lives in its own folder under `src/server/agents/`, and **every agent folder must have a `system-prompt.ts`** (exporting `SYSTEM_PROMPT`):
+
+```
+agents/<agent>/
+  system-prompt.ts      the agent's prompt (required)
+  tools.ts              its tools
+  index.ts              its spec: prompt + tools + run limits
+  proactive-prompt.ts   Treasury and Operations only: the prompt for automatic checks
+```
+
+`tests/unit/agent-layout.test.ts` fails if `agents/` gains any other folder, or an agent folder loses one of these files. Prompt blocks shared by several agents live in `shared-rules.ts`.
 
 | Agent | Reached from | Tools |
 |---|---|---|
@@ -105,6 +117,26 @@ Groq usage, as implemented in `runtime.ts`:
   - Groq's `tool_use_failed` (HTTP 400 for a malformed tool call): one retry, then a graceful failure.
 - **Errors:** Groq's typed errors (429, 401/403, 400, 5xx) and network failures become readable replies.
 - **Limits:** 15 model calls per message (Listing: 40), a timeout per run, 4000 characters per message, and one run per session at a time.
+
+### Proactive Treasury and Operations
+
+The Treasury and Operations agents also work without being asked. Rules decide *when*; the model only explains.
+
+```
+triggers (webhook event, daily schedule, "Check now")
+  -> detectors: plain code over the ledger and orders, no model
+  -> findings table, one open row per rule + subject (dedupe by fingerprint)
+  -> for each NEW finding: the matching agent verifies it with its read tools and writes a short headline + 3 sentences
+  -> feed on the overview, Treasury and Operations pages, nav badge, Discuss / Snooze / Dismiss
+```
+
+- **Detectors** (`src/server/proactive/detectors/`). Operations: the existing anomaly rules, refund-rate spike, earnings drop, stuck unpaid orders, proposals waiting for approval. Treasury: payout ready (balance has reached the payout-fee cap), idle balance, FX cost above the normal spread, forecast shift. Thresholds live in `thresholds.ts`.
+- **Quiet by design.** One finding per rule and subject; a dismissed one stays hidden while its rule keeps firing; a snoozed one returns when the snooze ends; one that stops firing resolves itself. Fee spikes, idle balances and forecast shifts are each reported once per seller, not once per order or currency.
+- **No new way to move money.** Operations never gets `propose_refund` in an automatic check. Treasury gets `propose_payout_schedule` only when the seller switches on "Let Treasury draft payout proposals" (off by default), and the proposal waits on the Approvals page like any other.
+- **Degraded mode.** If the model is down, rate-limited (one retry) or has no key, the finding is still saved with the rule's own English sentence.
+- **Cost controls.** At most 6 agent runs per seller per UTC day, one run at a time, and `PROACTIVE_AGENTS=off` turns the whole thing off.
+- **Triggers.** `processWebhookEvent` queues a check after a capture, refund, reversal or payout event (one per seller per 10 minutes). The worker schedules a daily check per seller at boot, so restart it after adding sellers. "Check now" queues one immediately.
+- **Discuss** opens the agent's chat on the conversation that wrote the finding.
 
 ### Fees and the ledger
 
@@ -154,4 +186,5 @@ The script prints pass/fail per case, token usage per model and the estimated co
 - Historical seed orders are demo data (capture ids start with `SEED-`). They count in the ledger and analytics, but they cannot be refunded through PayPal.
 - Payouts are one item per batch. A batch item that ends `UNCLAIMED` (receiver has no PayPal account) counts as sent.
 - Groq's free tier allows 8,000 tokens per minute per model. One agent step sends about 2,200 tokens, so a busy chat waits for the limit to reset. The paid Developer tier removes this wait. The buttons on each page (create listings, add to cart, pay, refund, pay out) use no AI or a single short call.
+- Automatic findings are written in the seller's language by the model; the fallback sentence used when the model is unavailable is English only.
 - AG Grid, Bryntum, next-intl UI translation and PayPal's marketplace/partner split are out of scope for this build.

@@ -5,7 +5,7 @@ import { compareSellingDirect, estimateFeesFor, forecastEarnings } from "../../s
 import { balancesView } from "../../services/ledger";
 import { MAX_PAYOUTS_PER_SCHEDULE, proposePayoutSchedule } from "../../services/payouts";
 import { defineTool } from "../tool";
-import { decimalAmount, sellerOf, uuid } from "./common";
+import { decimalAmount, sellerOf, uuid } from "../shared-tools";
 
 const getBalancesTool = defineTool({
   name: "get_balances",

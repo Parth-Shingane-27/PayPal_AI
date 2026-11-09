@@ -6,6 +6,7 @@ import { getMarket } from "@/server/domain/markets";
 import { sellerPath } from "@/lib/routes";
 import { sellerPage } from "@/server/page-auth";
 import { unreadCount } from "@/server/services/messages";
+import { newFindingCounts } from "@/server/proactive/findings";
 
 /** Signed-in workspace: never indexed. */
 export const metadata: Metadata = { robots: { index: false, follow: false } };
@@ -25,10 +26,16 @@ const LINKS: (Omit<NavLink, "label" | "href"> & { sub: string; key: MessageKey }
 export default async function SellerLayout({ children, params }: { children: React.ReactNode; params: Promise<{ sellerId: string }> }) {
   const { sellerId } = await params;
   const seller = await sellerPage(sellerId);
-  const unread = await unreadCount(seller);
+  const [unread, found] = await Promise.all([unreadCount(seller), newFindingCounts(seller.sellerId)]);
   const market = getMarket(seller.locale);
   const t = await getT();
-  const links: NavLink[] = LINKS.map(({ key, sub, ...l }) => ({ ...l, href: sellerPath(seller.sellerId, sub), label: t(key) }));
+  const links: NavLink[] = LINKS.map(({ key, sub, ...l }) => ({
+    ...l,
+    href: sellerPath(seller.sellerId, sub),
+    label: t(key),
+    // New findings count on the page of the agent that wrote them.
+    count: sub === "treasury" ? found.TREASURY : sub === "operations" ? found.OPERATIONS : undefined,
+  }));
   return (
     <Shell variant="rail" links={links} who={seller.name} sub={t("shell.sellsFrom", { country: market.country, currency: market.currency })} initialUnread={unread}>
       {children}

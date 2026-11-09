@@ -34,6 +34,7 @@ export function openAskAi() {
   window.dispatchEvent(new Event(OPEN_EVENT));
 }
 const OPEN_EVENT = "askai:open";
+export const AUTO_OPEN_KEY = "askai-autoopen";
 
 export function AskAi({ label, hint, children }: { label: string; hint: string; children: React.ReactNode }) {
   const [open, setOpen] = useState(false);
@@ -43,6 +44,17 @@ export function AskAi({ label, hint, children }: { label: string; hint: string; 
     window.addEventListener(OPEN_EVENT, onOpen);
     return () => window.removeEventListener(OPEN_EVENT, onOpen);
   });
+  // "Discuss" on a finding from another page: that page asked for the assistant to open on arrival.
+  useEffect(() => {
+    try {
+      if (window.sessionStorage.getItem(AUTO_OPEN_KEY) !== "1") return;
+      window.sessionStorage.removeItem(AUTO_OPEN_KEY);
+    } catch {
+      return;
+    }
+    const id = window.setTimeout(() => window.dispatchEvent(new Event(OPEN_EVENT)), 0);
+    return () => window.clearTimeout(id);
+  }, []);
   // Server render assumes "seen" so the attention dot only appears client-side.
   const storedSeen = useSyncExternalStore(noSubscribe, readSeen, () => true);
   const [openedNow, setOpenedNow] = useState(false);

@@ -41,7 +41,7 @@ const ICONS = {
   orders: IconReceipt,
 };
 export type IconKey = keyof typeof ICONS;
-export type NavLink = { href: string; label: string; icon: IconKey; exact?: boolean; badge?: "unread" };
+export type NavLink = { href: string; label: string; icon: IconKey; exact?: boolean; badge?: "unread"; /** A fixed count (e.g. new findings), rendered like the unread badge. */ count?: number };
 
 function isActive(pathname: string, l: NavLink) {
   return l.exact ? pathname === l.href : pathname === l.href || pathname.startsWith(`${l.href}/`);
@@ -71,13 +71,13 @@ function useUnread(initial: number) {
   return unread;
 }
 
-function Badge({ n }: { n: number }) {
+function Badge({ n, label }: { n: number; label?: string }) {
   const t = useT();
   if (n <= 0) return null;
   return (
     <span className="ml-auto inline-flex min-w-6 items-center justify-center rounded-full bg-alert px-1.5 text-xs font-semibold leading-5 text-sheet">
       {n}
-      <span className="sr-only"> {t("shell.unread")}</span>
+      <span className="sr-only"> {label ?? t("shell.unread")}</span>
     </span>
   );
 }
@@ -97,6 +97,7 @@ function Brand({ href }: { href: string }) {
 
 function LinkList({ links, unread, onNavigate, dense }: { links: NavLink[]; unread: number; onNavigate?: () => void; dense?: boolean }) {
   const pathname = usePathname();
+  const t = useT();
   return (
     <ul className={dense ? "flex items-center gap-0.5" : "flex flex-col gap-0.5"}>
       {links.map((l) => {
@@ -117,6 +118,7 @@ function LinkList({ links, unread, onNavigate, dense }: { links: NavLink[]; unre
               <Icon />
               <span>{l.label}</span>
               {l.badge === "unread" && <Badge n={unread} />}
+              {l.count ? <Badge n={l.count} label={t("find.new")} /> : null}
             </Link>
           </li>
         );

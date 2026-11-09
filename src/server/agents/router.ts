@@ -4,7 +4,7 @@ import { groqConfig } from "../config";
 import { AppError } from "../errors";
 import { type AuditCtx, recordModelRun } from "../services/audit";
 import { groqClient } from "./model";
-import { ROUTER_PROMPT } from "./prompts";
+import { ROUTER_PROMPT } from "./router-prompt";
 import { SELLER_AGENT_NAMES } from "./registry";
 import { jsonSchemaFor } from "./tool";
 

@@ -10,11 +10,13 @@ export const QUEUE_NAMES = {
   webhooks: "webhooks",
   embeddings: "embeddings",
   payouts: "payouts",
+  watch: "watch",
 } as const;
 
 export type WebhookJob = { eventId: string };
 export type EmbeddingJob = { listingId: string };
 export type PayoutJob = { payoutId: string };
+export type WatchJob = { sellerId: string };
 
 /** BullMQ needs maxRetriesPerRequest: null on every connection it uses. */
 export function redisConnection() {
@@ -72,6 +74,24 @@ export async function schedulePayoutJob(payoutId: string, runAt: Date): Promise<
     attempts: 8,
     backoff: { type: "exponential", delay: 30_000 },
   });
+}
+
+/** One proactive check per seller per 10-minute window: a burst of events becomes one run. */
+export const WATCH_WINDOW_MS = 10 * 60_000;
+
+export async function enqueueWatch(sellerId: string, opts: { manual?: boolean; now?: number } = {}): Promise<void> {
+  const now = opts.now ?? Date.now();
+  await queue(QUEUE_NAMES.watch).add("watch", { sellerId } satisfies WatchJob, {
+    // A manual "Check now" is never swallowed by the window; it is still one job per click.
+    jobId: opts.manual ? `watch-${sellerId}-manual-${now}` : `watch-${sellerId}-${Math.floor(now / WATCH_WINDOW_MS)}`,
+    attempts: 2,
+    backoff: { type: "fixed", delay: 30_000 },
+  });
+}
+
+/** Daily check for one seller. upsertJobScheduler is idempotent, so calling it on every boot is safe. */
+export async function scheduleDailyWatch(sellerId: string): Promise<void> {
+  await queue(QUEUE_NAMES.watch).upsertJobScheduler(`daily-watch-${sellerId}`, { every: 24 * 60 * 60_000 }, { name: "watch", data: { sellerId } satisfies WatchJob });
 }
 
 export async function closeQueues(): Promise<void> {

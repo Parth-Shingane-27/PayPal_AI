@@ -89,7 +89,7 @@ export async function updateCart(buyerId: string, listingId: string, quantity: n
 export async function viewCart(buyerId: string) {
   const orders = await prisma.order.findMany({
     where: { buyer_id: buyerId, status: { in: OPEN_STATUSES }, items: { some: {} } },
-    include: { items: { orderBy: { title: "asc" } }, seller: true },
+    include: { items: { orderBy: { title: "asc" }, include: { listing: { select: { product: { select: { id: true, image_url: true } } } } } }, seller: true },
     orderBy: { created_at: "asc" },
   });
   return {
@@ -98,10 +98,13 @@ export async function viewCart(buyerId: string) {
       return {
         cart_id: o.id,
         seller: o.seller.name,
+        seller_country: o.seller.country,
         currency: o.currency,
         status: o.status === "CART" ? "OPEN" : "CHECKOUT_STARTED",
         items: o.items.map((i) => ({
           listing_id: i.listing_id,
+          product_id: i.listing.product.id,
+          image_url: i.listing.product.image_url,
           title: i.title,
           quantity: i.quantity,
           unit_price: money(i.unit_price_minor, o.currency, o.locale),

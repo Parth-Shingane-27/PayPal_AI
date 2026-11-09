@@ -7,7 +7,7 @@ import { AppError } from "../../errors";
 import { createProduct, productFromForm, productView, saveListingDraft, SEO_TITLE_MAX } from "../../services/catalog";
 import { type PriceQuote, quotePrice } from "../../services/pricing";
 import { defineTool } from "../tool";
-import { decimalAmount, sellerOf, uuid } from "./common";
+import { decimalAmount, sellerOf, uuid } from "../shared-tools";
 
 export const getProductTool = defineTool({
   name: "get_product",

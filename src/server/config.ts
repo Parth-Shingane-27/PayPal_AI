@@ -93,6 +93,11 @@ export function workerConfig(): z.infer<typeof workerSchema> {
   return parse("worker", workerSchema);
 }
 
+/** Kill switch for the proactive Treasury and Operations agents. On unless PROACTIVE_AGENTS=off. */
+export function proactiveEnabled(): boolean {
+  return (process.env.PROACTIVE_AGENTS ?? "on").trim().toLowerCase() !== "off";
+}
+
 /** Demo login: always available outside production, opt-in in production. */
 export function demoLoginEnabled(): boolean {
   const cfg = coreConfig();
