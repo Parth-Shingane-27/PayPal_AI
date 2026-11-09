@@ -5,7 +5,14 @@ import { listMarkets, MARKET_LOCALES } from "../../domain/markets";
 import { money, SUPPORTED_CURRENCIES } from "../../domain/money";
 import { AppError } from "../../errors";
 import { createProduct, productFromForm, productView, saveListingDraft, SEO_TITLE_MAX, setListingPrice } from "../../services/catalog";
-import { productMarketOverview, researchMarketPrices } from "../../services/market-research";
+import {
+  linkDraftResearch,
+  pricingAtPositions,
+  productMarketOverview,
+  researchDraftPrices,
+  researchMarketPrices,
+  type ResearchOutcome,
+} from "../../services/market-research";
 import { type PriceQuote, quotePrice } from "../../services/pricing";
 import { defineTool } from "../tool";
 import { decimalAmount, sellerOf, uuid } from "../shared-tools";
@@ -114,19 +121,37 @@ const saveListingDraftTool = defineTool({
 const researchMarketPricesTool = defineTool({
   name: "research_market_prices",
   description:
-    "Find what comparable products sell for in each market: searches that country's online shops (in its language) and other sellers on GlobalCart. Code validates every offer (its URL must come from the search, used items are dropped), divides pack prices into unit prices, converts them into the market currency at today's ECB rate, drops outliers and computes the range. Returns per market: range (low, p25, median, p75, high), the offers with shop, title, unit_price, listed_price, url and whether the price was confirmed on the page, the seller's current listing price, and notes. Research from the last 24 hours is reused unless refresh is true. Takes about 10-20 seconds per market. Call it before pricing a market so suggest_price can use positioning. Read-only; it changes no listing.",
+    "Find what comparable products sell for in each market: searches that country's online shops (in its language) and other sellers on GlobalCart. Code validates every offer (its URL must come from the search, used items are dropped), divides pack prices into unit prices, converts them into the market currency at today's ECB rate, drops outliers and computes the range. Returns per market: range (low, p25, median, p75, high), the offers with shop, title, unit_price, listed_price, url and whether the price was confirmed on the page, the seller's current listing price, and notes. Research from the last 24 hours is reused unless refresh is true. For a product being added, pass preview_id: the result also gives at_your_costs (the price the seller's cost and target margin lead to, and the margin they would make at the market's lower quartile, median and upper quartile), and the research carries over when the product is created. Takes about 10-20 seconds per market. Call it before pricing a market so suggest_price can use positioning. Read-only; it changes no listing.",
   kind: "read",
   input: z.object({
-    product_id: uuid(),
+    product_id: uuid().nullable().describe("A saved product's id, or null when researching a product being added (pass preview_id instead)."),
+    preview_id: uuid()
+      .nullable()
+      .describe("preview_id from preview_product in this conversation, to research a product before it is created; null for a saved product."),
     markets: z.array(z.enum(MARKET_LOCALES)).min(1).max(6).describe("Market locales to research, at most 6 per call."),
     refresh: z.boolean().nullable().describe("true to search again even if research from the last 24 hours exists; null or false to reuse it."),
   }),
   async run(ctx, input) {
-    const results = await researchMarketPrices(sellerOf(ctx), input.product_id, input.markets, { refresh: input.refresh ?? false });
+    const sellerId = sellerOf(ctx);
+    if ((input.product_id === null) === (input.preview_id === null)) {
+      throw new AppError("INVALID_INPUT", "Pass either product_id (a saved product) or preview_id (a product being added), not both.");
+    }
+    let results: (ResearchOutcome & { pricing?: Awaited<ReturnType<typeof pricingAtPositions>> })[];
+    if (input.preview_id) {
+      const preview = await prisma.agentAction.findFirst({
+        where: { id: input.preview_id, tool: "preview_product", status: "SUCCEEDED", seller_id: sellerId, session_id: ctx.sessionId },
+      });
+      if (!preview?.output) throw new AppError("NOT_FOUND", "Preview not found. Call preview_product first and use its preview_id.");
+      const p = productFromForm((preview.output as { form: ProductForm }).form);
+      results = await researchDraftPrices(sellerId, p, input.markets, { refresh: input.refresh ?? false });
+    } else {
+      results = await researchMarketPrices(sellerId, input.product_id!, input.markets, { refresh: input.refresh ?? false });
+    }
     return {
       markets: results.map((r) => {
         if ("error" in r) return { market: r.market, error: r.error };
         const x = r.result;
+        const pricing = r.pricing ?? null;
         return {
           market: r.market,
           currency: x.currency,
@@ -146,6 +171,15 @@ const researchMarketPricesTool = defineTool({
             url: o.url,
           })),
           web_search: x.web.status === "failed" ? { status: "failed", error: x.web.error } : { status: x.web.status },
+          ...(pricing
+            ? {
+                at_your_costs: {
+                  price_at_target_margin: pricing.cost_based_price,
+                  target_margin_percent: pricing.target_margin_percent,
+                  margin_if_priced_at_market: pricing.margin_at_market,
+                },
+              }
+            : {}),
           notes: [...x.notes, ...(x.globalcart.note ? [x.globalcart.note] : [])],
         };
       }),
@@ -294,6 +328,7 @@ const createProductTool = defineTool({
     }
     const { form } = preview.output as { form: ProductForm };
     const product = await createProduct(sellerId, productFromForm(form));
+    await linkDraftResearch(sellerId, product.id, product.title, product.description);
     return {
       product_id: product.id,
       sku: product.sku,

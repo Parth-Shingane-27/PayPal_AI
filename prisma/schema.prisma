@@ -256,7 +256,11 @@ model Listing {
 model MarketPriceResearch {
   id          String   @id @default(uuid(7)) @db.Uuid
   seller_id   String   @db.Uuid
-  product_id  String   @db.Uuid
+  /// Null while the product is still being added (research from the add form);
+  /// linked by query_hash when the product is created.
+  product_id  String?  @db.Uuid
+  /// Hash of the product's title and description, so research from the add form carries over to the product.
+  query_hash  String?
   locale      String
   /// Market currency every amount in `result` is converted into.
   currency    String   @db.Char(3)
@@ -266,11 +270,11 @@ model MarketPriceResearch {
   offer_count Int
   created_at  DateTime @default(now()) @db.Timestamptz(3)
 
-  seller  Seller  @relation(fields: [seller_id], references: [id])
-  product Product @relation(fields: [product_id], references: [id], onDelete: Cascade)
+  seller  Seller   @relation(fields: [seller_id], references: [id])
+  product Product? @relation(fields: [product_id], references: [id], onDelete: Cascade)
 
   @@index([product_id, locale, created_at])
-  @@index([seller_id])
+  @@index([seller_id, query_hash, locale, created_at])
   @@map("market_price_research")
 }
 

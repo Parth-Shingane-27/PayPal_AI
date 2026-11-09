@@ -1,13 +1,14 @@
 import { type FxApi, frankfurter } from "../clients/frankfurter";
 import { type EmbeddingApi, voyage } from "../clients/voyage";
 import { prisma } from "../db";
-import { amountAppearsIn, convertDecimalToMinor, normalizeUrl, type PriceStats, priceStats } from "../domain/market-prices";
+import { createHash } from "node:crypto";
+import { amountAppearsIn, anchorFor, convertDecimalToMinor, normalizeUrl, type Positioning, type PriceStats, priceStats } from "../domain/market-prices";
 import { getMarket, isMarketLocale, listMarkets, type Market } from "../domain/markets";
 import { convertMinor, currencyExponent, money } from "../domain/money";
 import { AppError, notFound } from "../errors";
 import { liveModel, type ModelApi } from "../agents/model";
 import { asJson, type AuditCtx } from "./audit";
-import { latestResearch } from "./pricing";
+import { type CostFacts, quoteFromFacts } from "./pricing";
 import { searchWebPrices, type WebEvidence, type WebOffer } from "./web-prices";
 
 /**
@@ -152,7 +153,7 @@ export async function validateWebOffers(
   return { kept, dropped, rates: [...rates.values()].filter((r) => r.from !== r.to) };
 }
 
-type ProductRow = { id: string; title: string; description: string; attributes: unknown; category: string | null };
+type ProductRow = { id: string | null; title: string; description: string; attributes: unknown; category: string | null };
 
 /** Other sellers' published listings in this market that are semantically close to the product. */
 async function globalcartComparables(product: ProductRow, market: Market, embed: EmbeddingApi): Promise<{ offers: MarketOffer[]; note: string | null; ok: boolean }> {
@@ -167,7 +168,7 @@ async function globalcartComparables(product: ProductRow, market: Market, embed:
   const rows = await prisma.$queryRaw<{ id: string; title: string; price_minor: number; currency: string; seller_name: string; similarity: number }[]>`
     SELECT l.id, l.title, l.price_minor, l.currency, s.name AS seller_name, 1 - (l.embedding <=> ${literal}::vector) AS similarity
     FROM listings l JOIN sellers s ON s.id = l.seller_id
-    WHERE l.status = 'PUBLISHED' AND l.locale = ${market.locale} AND l.embedding IS NOT NULL AND l.product_id <> ${product.id}::uuid
+    WHERE l.status = 'PUBLISHED' AND l.locale = ${market.locale} AND l.embedding IS NOT NULL AND (${product.id}::uuid IS NULL OR l.product_id <> ${product.id}::uuid)
     ORDER BY l.embedding <=> ${literal}::vector
     LIMIT 5`;
   const close = rows.filter((r) => Number(r.similarity) >= SIMILARITY_FLOOR && r.currency === market.currency);
@@ -195,7 +196,7 @@ async function researchOne(sellerId: string, product: ProductRow, locale: string
   const audit: AuditCtx = { actor: { type: "SELLER", sellerId }, agent: "LISTING" };
   const notes: string[] = [];
 
-  const own = await prisma.listing.findFirst({ where: { seller_id: sellerId, product_id: product.id, locale } });
+  const own = product.id ? await prisma.listing.findFirst({ where: { seller_id: sellerId, product_id: product.id, locale } }) : null;
 
   let web: MarketResearchResult["web"] = { status: "ok", error: null, queries: [], dropped: {} };
   let webOffers: MarketOffer[] = [];
@@ -239,7 +240,7 @@ async function researchOne(sellerId: string, product: ProductRow, locale: string
   };
 }
 
-async function ownedProduct(sellerId: string, productId: string): Promise<ProductRow> {
+async function ownedProduct(sellerId: string, productId: string): Promise<ProductRow & { id: string }> {
   const product = await prisma.product.findFirst({
     where: { id: productId, seller_id: sellerId },
     select: { id: true, title: true, description: true, attributes: true, category: true },
@@ -248,24 +249,25 @@ async function ownedProduct(sellerId: string, productId: string): Promise<Produc
   return product;
 }
 
+/** Same product text, same research: whitespace and case do not matter. */
+export function productQueryHash(title: string, description: string): string {
+  const norm = (t: string) => t.normalize("NFKC").toLowerCase().replace(/\s+/g, " ").trim();
+  return createHash("sha256").update(`${norm(title)}\n${norm(description)}`).digest("hex");
+}
+
 export type ResearchOutcome = { market: string; cached: boolean; research_id: string; result: MarketResearchResult } | { market: string; error: string };
 
-/**
- * Researches several markets (two at a time). Fresh research from the last day
- * is reused unless `refresh` is set. A failure in one market does not stop the others.
- */
-export async function researchMarketPrices(
-  sellerId: string,
-  productId: string,
-  markets: string[],
-  opts: Deps & { refresh?: boolean } = {},
-): Promise<ResearchOutcome[]> {
+function validLocales(markets: string[]): string[] {
   const locales = [...new Set(markets)];
   if (locales.length === 0) throw new AppError("INVALID_INPUT", "Choose at least one market.");
   for (const l of locales) if (!isMarketLocale(l)) throw new AppError("INVALID_INPUT", `Unknown market ${l}.`);
-  const product = await ownedProduct(sellerId, productId);
-  const deps: Required<Deps> = { model: opts.model ?? liveModel, fx: opts.fx ?? frankfurter, embed: opts.embed ?? voyage };
+  return locales;
+}
 
+/** Researches markets two at a time, reusing fresh research (from the product or the same product text) unless `refresh`. */
+async function runResearch(sellerId: string, product: ProductRow, locales: string[], opts: Deps & { refresh?: boolean }): Promise<ResearchOutcome[]> {
+  const deps: Required<Deps> = { model: opts.model ?? liveModel, fx: opts.fx ?? frankfurter, embed: opts.embed ?? voyage };
+  const hash = productQueryHash(product.title, product.description);
   const results: ResearchOutcome[] = new Array(locales.length);
   let next = 0;
   async function worker() {
@@ -274,10 +276,19 @@ export async function researchMarketPrices(
       const locale = locales[i]!;
       try {
         if (!opts.refresh) {
-          const hit = await latestResearch(sellerId, productId, locale, RESEARCH_REUSE_MS);
+          const hit = await prisma.marketPriceResearch.findFirst({
+            where: {
+              seller_id: sellerId,
+              locale,
+              created_at: { gte: new Date(Date.now() - RESEARCH_REUSE_MS) },
+              OR: [...(product.id ? [{ product_id: product.id }] : []), { query_hash: hash }],
+            },
+            orderBy: { created_at: "desc" },
+          });
+          const result = hit?.result as unknown as MarketResearchResult | undefined;
           // A failed web search is stored for the record but never reused.
-          if (hit && hit.result.web.status !== "failed") {
-            results[i] = { market: locale, cached: true, research_id: hit.id, result: hit.result };
+          if (hit && result && result.web.status !== "failed") {
+            results[i] = { market: locale, cached: true, research_id: hit.id, result };
             continue;
           }
         }
@@ -285,7 +296,8 @@ export async function researchMarketPrices(
         const row = await prisma.marketPriceResearch.create({
           data: {
             seller_id: sellerId,
-            product_id: productId,
+            product_id: product.id,
+            query_hash: hash,
             locale,
             currency: result.currency,
             result: asJson(result),
@@ -301,6 +313,86 @@ export async function researchMarketPrices(
   }
   await Promise.all(Array.from({ length: Math.min(CONCURRENCY, locales.length) }, worker));
   return results;
+}
+
+/**
+ * Researches several markets for a saved product. Fresh research from the
+ * last day is reused unless `refresh` is set. A failure in one market does not stop the others.
+ */
+export async function researchMarketPrices(
+  sellerId: string,
+  productId: string,
+  markets: string[],
+  opts: Deps & { refresh?: boolean } = {},
+): Promise<ResearchOutcome[]> {
+  const locales = validLocales(markets);
+  return runResearch(sellerId, await ownedProduct(sellerId, productId), locales, opts);
+}
+
+/** A product the seller is still adding: its text, costs and target margin as typed in the form. */
+export type DraftProduct = {
+  title: string;
+  description: string;
+  category?: string | null;
+  attributes?: Record<string, unknown>;
+  cost_minor: number;
+  shipping_minor: number;
+  cost_currency: string;
+  margin_bps: number;
+};
+
+/**
+ * Market prices while adding a product, before it exists. Research is stored
+ * by the product text and linked to the product when it is created, so the
+ * product page shows it and pricing uses it.
+ */
+export async function researchDraftPrices(sellerId: string, draft: DraftProduct, markets: string[], opts: Deps & { refresh?: boolean } = {}) {
+  const locales = validLocales(markets);
+  if (!draft.title.trim() || !draft.description.trim()) throw new AppError("INVALID_INPUT", "Give the product a name and a description first.");
+  const product: ProductRow = { id: null, title: draft.title.trim(), description: draft.description.trim(), attributes: draft.attributes ?? {}, category: draft.category ?? null };
+  const outcomes = await runResearch(sellerId, product, locales, opts);
+  return Promise.all(
+    outcomes.map(async (o) => ("error" in o ? o : { ...o, pricing: await pricingAtPositions(sellerId, { id: null, ...draft }, o.market, { id: o.research_id, created_at: new Date(o.result.researched_at), result: o.result }, opts.fx) })),
+  );
+}
+
+/**
+ * What the seller's costs and margin mean in one market: the lowest price at
+ * the target margin, the price at each positioning, and the margin they would
+ * make at the market's lower quartile, median and upper quartile.
+ */
+export async function pricingAtPositions(
+  sellerId: string,
+  facts: CostFacts,
+  locale: string,
+  research: { id: string; created_at: Date; result: MarketResearchResult } | null,
+  fx: FxApi = frankfurter,
+) {
+  const at = (req: Omit<Parameters<typeof quoteFromFacts>[2], "locale">) => quoteFromFacts(sellerId, facts, { locale, ...req }, research, fx);
+  const base = await at({});
+  const by_positioning: Record<Positioning, unknown> = { competitive: null, market: null, premium: null };
+  const margin_at_market: Record<Positioning, number | null> = { competitive: null, market: null, premium: null };
+  const stats = research?.result.currency === base.currency ? research.result.stats : null;
+  for (const positioning of ["competitive", "market", "premium"] as const) {
+    const q = await at({ positioning });
+    by_positioning[positioning] = { price: q.suggested_price, profit: q.profit, margin_percent: q.margin_percent, strategy: q.strategy, warnings: q.warnings };
+    if (stats) {
+      const target = anchorFor(stats, positioning);
+      const exp = currencyExponent(base.currency);
+      const decimal = exp === 0 ? String(target) : `${Math.floor(target / 10 ** exp)}.${String(target % 10 ** exp).padStart(exp, "0")}`;
+      margin_at_market[positioning] = (await at({ targetPrice: decimal })).margin_percent;
+    }
+  }
+  return { margin_floor_price: base.margin_floor_price, cost_based_price: base.suggested_price, target_margin_percent: base.target_margin_percent, by_positioning, margin_at_market };
+}
+
+/** Called when a product is created: research done in the add form now belongs to it. */
+export async function linkDraftResearch(sellerId: string, productId: string, title: string, description: string): Promise<number> {
+  const { count } = await prisma.marketPriceResearch.updateMany({
+    where: { seller_id: sellerId, product_id: null, query_hash: productQueryHash(title, description) },
+    data: { product_id: productId },
+  });
+  return count;
 }
 
 /** The newest research per market for a product (any age), for the editor. */

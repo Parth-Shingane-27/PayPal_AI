@@ -78,6 +78,21 @@ export async function quotePrice(sellerId: string, req: QuoteRequest, fx: FxApi 
   if (!isMarketLocale(req.locale)) throw new AppError("INVALID_INPUT", `Unknown market ${req.locale}.`);
   const product = await prisma.product.findFirst({ where: { id: req.productId, seller_id: sellerId } });
   if (!product) throw notFound("Product");
+  const research = await latestResearch(sellerId, product.id, req.locale);
+  const quote = await quoteFromFacts(sellerId, product, req, research, fx);
+  return { ...quote, product_id: product.id };
+}
+
+/** What pricing needs to know about a product; id is null for a product still being added. */
+export type CostFacts = { id: string | null; cost_minor: number; shipping_minor: number; cost_currency: string; margin_bps: number };
+type Research = Awaited<ReturnType<typeof latestResearch>>;
+
+/**
+ * A price quote from cost facts and (optional) market research. Used for saved
+ * products and for the add-product form, before the product exists.
+ */
+export async function quoteFromFacts(sellerId: string, product: CostFacts, req: Omit<QuoteRequest, "productId">, research: Research, fx: FxApi = frankfurter) {
+  if (!isMarketLocale(req.locale)) throw new AppError("INVALID_INPUT", `Unknown market ${req.locale}.`);
 
   const market = getMarket(req.locale);
   const sale = await saleContextFor(sellerId, req.locale);
@@ -99,7 +114,6 @@ export async function quotePrice(sellerId: string, req: QuoteRequest, fx: FxApi 
 
   // Market research: an anchor when the seller chose a positioning (and gave no
   // explicit range or price), and context for every quote.
-  const research = await latestResearch(sellerId, product.id, market.locale);
   const stats = research && research.result.currency === market.currency ? research.result.stats : null;
   const marketAnchorMinor = req.positioning && stats && !competitor && targetPriceMinor === undefined ? anchorFor(stats, req.positioning) : undefined;
 

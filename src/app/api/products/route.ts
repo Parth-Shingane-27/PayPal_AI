@@ -2,6 +2,7 @@ import { requireSeller } from "@/server/auth";
 import { handler, json, readBody } from "@/server/http";
 import { createProduct, listProducts, productFormSchema, productFromForm } from "@/server/services/catalog";
 import { money } from "@/server/domain/money";
+import { linkDraftResearch } from "@/server/services/market-research";
 
 export const GET = handler(async (req) => {
   const seller = await requireSeller(req);
@@ -27,5 +28,7 @@ export const GET = handler(async (req) => {
 export const POST = handler(async (req) => {
   const seller = await requireSeller(req);
   const product = await createProduct(seller.sellerId, productFromForm(await readBody(req, productFormSchema)));
+  // Market prices checked in the add form now belong to this product.
+  await linkDraftResearch(seller.sellerId, product.id, product.title, product.description);
   return json({ id: product.id }, 201);
 });

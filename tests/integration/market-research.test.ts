@@ -5,7 +5,7 @@ import { frankfurter } from "@/server/clients/frankfurter";
 import { voyage } from "@/server/clients/voyage";
 import { prisma } from "@/server/db";
 import { localizeProduct } from "@/server/services/localize";
-import { productMarketOverview, researchMarketPrices } from "@/server/services/market-research";
+import { linkDraftResearch, productMarketOverview, productQueryHash, researchDraftPrices, researchMarketPrices } from "@/server/services/market-research";
 import { quotePrice } from "@/server/services/pricing";
 import { evidenceFrom } from "@/server/services/web-prices";
 import { makeListing, makeProduct, makeSeller, resetDb } from "../helpers/db";
@@ -256,7 +256,7 @@ describe("Listing Agent with market research", () => {
     vi.spyOn(voyage, "embed").mockRejectedValue(new Error("no key"));
 
     const s = scriptedModel([
-      reply([call("r", "research_market_prices", { product_id: w.product.id, markets: ["de-DE"], refresh: null })]),
+      reply([call("r", "research_market_prices", { product_id: w.product.id, preview_id: null, markets: ["de-DE"], refresh: null })]),
       (params) => {
         const [res] = lastResponses(params);
         const out = (res!.response as { output: { markets: { comparable_prices_found: number; your_listing: unknown }[] } }).output;
@@ -283,5 +283,110 @@ describe("Listing Agent with market research", () => {
     const quote = await quotePrice(w.seller.id, { productId: w.product.id, locale: "de-DE", positioning: "market" });
     expect(after).toMatchObject({ status: "DRAFT", price_minor: quote.suggested_price.amount_minor, title: listing.title });
     expect(after.pricing).toMatchObject({ strategy: "MARKET_ANCHOR" });
+  });
+});
+
+describe("market prices while adding a product", () => {
+  const draft = {
+    title: "Hand-thrown stoneware mug",
+    description: "A 12 oz speckled stoneware mug.",
+    cost_minor: 1800,
+    shipping_minor: 900,
+    cost_currency: "EUR",
+    margin_bps: 4000,
+  };
+
+  it("researches before the product exists and shows the margin at market prices", async () => {
+    stubFx();
+    const seller = await makeSeller({ country: "DE", currency: "EUR", locale: "de-DE" });
+    const s = scriptedModel(researchSteps());
+    const [out] = await researchDraftPrices(seller.id, draft, ["de-DE"], { model: s.model, embed: noEmbed });
+    if (!out || "error" in out) throw new Error("research failed");
+    expect(out.result.stats).toMatchObject({ count: 4 });
+    const p = out.pricing;
+    expect(p.target_margin_percent).toBe(40);
+    expect(p.cost_based_price.amount_minor).toBeGreaterThan(out.result.stats!.high); // 27 EUR landed at 40% margin is above this market
+    // At the market median the seller would make less than their 40% target (here a loss).
+    expect(p.margin_at_market.market).not.toBeNull();
+    expect(p.margin_at_market.market!).toBeLessThan(40);
+    expect(p.margin_at_market.premium!).toBeGreaterThan(p.margin_at_market.competitive!);
+    const row = await prisma.marketPriceResearch.findFirstOrThrow();
+    expect(row).toMatchObject({ product_id: null, query_hash: productQueryHash(draft.title, draft.description) });
+  });
+
+  it("reuses the draft research for the same text, and links it to the product once created", async () => {
+    stubFx();
+    const seller = await makeSeller({ country: "DE", currency: "EUR", locale: "de-DE" });
+    const s = scriptedModel(researchSteps());
+    await researchDraftPrices(seller.id, draft, ["de-DE"], { model: s.model, embed: noEmbed });
+    // Same text with different spacing and case: no new search.
+    const [again] = await researchDraftPrices(seller.id, { ...draft, title: "  hand-thrown  STONEWARE mug ", margin_bps: 2500 }, ["de-DE"], { model: s.model, embed: noEmbed });
+    expect(again).toMatchObject({ cached: true, pricing: { target_margin_percent: 25 } });
+    expect(s.requests).toHaveLength(2);
+
+    const product = await prisma.product.create({ data: { seller_id: seller.id, sku: "MUG", source_locale: "de-DE", ...draft, title: draft.title, description: draft.description } });
+    expect(await linkDraftResearch(seller.id, product.id, product.title, product.description)).toBe(1);
+    // The product page and pricing now use it, without searching again.
+    const q = await quotePrice(seller.id, { productId: product.id, locale: "de-DE", positioning: "market" });
+    expect(q.market).toMatchObject({ offers_compared: 4 });
+    const [cached] = await researchMarketPrices(seller.id, product.id, ["de-DE"], { model: s.model, embed: noEmbed });
+    expect(cached).toMatchObject({ cached: true });
+  });
+
+  it("never links another seller's research", async () => {
+    stubFx();
+    const a = await makeSeller();
+    const b = await makeSeller();
+    await researchDraftPrices(a.id, draft, ["de-DE"], { model: scriptedModel(researchSteps()).model, embed: noEmbed });
+    const product = await makeProduct(b.id);
+    expect(await linkDraftResearch(b.id, product.id, draft.title, draft.description)).toBe(0);
+  });
+
+  it("the assistant researches a previewed product before creating it", async () => {
+    stubFx();
+    const seller = await makeSeller({ country: "DE", currency: "EUR", locale: "de-DE" });
+    const research = scriptedModel(researchSteps());
+    vi.spyOn(liveModel, "chat").mockImplementation(research.model.chat);
+    vi.spyOn(voyage, "embed").mockRejectedValue(new Error("no key"));
+    const mug = { title: draft.title, description: draft.description, written_in: null, cost: "18", shipping: "9", cost_currency: "EUR", margin_percent: "40", sku: null, material: null, size: null };
+    const s = scriptedModel([
+      reply([call("p", "preview_product", mug)]),
+      (params) => {
+        const [preview] = lastResponses(params);
+        const previewId = (preview!.response as { output: { preview_id: string } }).output.preview_id;
+        return reply([call("r", "research_market_prices", { product_id: null, preview_id: previewId, markets: ["de-DE"], refresh: null })]);
+      },
+      (params) => {
+        const [res] = lastResponses(params);
+        const out = (res!.response as { output: { markets: { range: unknown; at_your_costs: { target_margin_percent: number; margin_if_priced_at_market: { market: number } } }[] } }).output;
+        expect(out.markets[0]!.range).not.toBeNull();
+        expect(out.markets[0]!.at_your_costs.target_margin_percent).toBe(40);
+        expect(typeof out.markets[0]!.at_your_costs.margin_if_priced_at_market.market).toBe("number");
+        return reply([text("Here is the summary and the market. Confirm?")]);
+      },
+    ]);
+    const res = await sendMessage({
+      owner: { type: "SELLER", sellerId: seller.id },
+      agent: "LISTING",
+      text: "I make hand-thrown stoneware mugs, 12 oz. Each costs me 18 EUR plus 9 EUR shipping. I want about 40% margin.",
+      deps: { model: s.model, reasoningEffort: "medium", modelId: "openai/gpt-oss-120b" },
+    });
+    expect(res.turns[0]!.outcome).toBe("completed");
+    expect(await prisma.product.count()).toBe(0);
+    expect(await prisma.marketPriceResearch.count({ where: { product_id: null } })).toBe(1);
+  });
+
+  it("rejects passing both or neither of product_id and preview_id", async () => {
+    stubFx();
+    const w = await world();
+    const s = scriptedModel([
+      reply([call("r", "research_market_prices", { product_id: null, preview_id: null, markets: ["de-DE"], refresh: null })]),
+      (params) => {
+        const [res] = lastResponses(params);
+        expect(res!.response).toMatchObject({ error: { code: "INVALID_INPUT" } });
+        return reply([text("ok")]);
+      },
+    ]);
+    await sendMessage({ owner: { type: "SELLER", sellerId: w.seller.id }, agent: "LISTING", text: "prices?", deps: { model: s.model, reasoningEffort: "medium", modelId: "openai/gpt-oss-120b" } });
   });
 });

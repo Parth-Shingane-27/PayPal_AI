@@ -1,25 +1,17 @@
 import { z } from "zod";
 import { requireSeller } from "@/server/auth";
+import { prisma } from "@/server/db";
 import { MARKET_LOCALES } from "@/server/domain/markets";
+import { notFound } from "@/server/errors";
 import { handler, json, readBody, routeId } from "@/server/http";
-import { researchMarketPrices, savedMarketResearch } from "@/server/services/market-research";
-import { quotePrice } from "@/server/services/pricing";
-import { AppError } from "@/server/errors";
+import { pricingAtPositions, researchMarketPrices, savedMarketResearch } from "@/server/services/market-research";
+import { latestResearch } from "@/server/services/pricing";
 
-/** What the price would be at each positioning, given the stored research (code, no AI). */
+/** What the price would be at each positioning, and the margin at market prices (code, no AI). */
 async function suggestions(sellerId: string, productId: string, market: string) {
-  const out: Record<string, unknown> = {};
-  for (const positioning of ["competitive", "market", "premium"] as const) {
-    try {
-      const q = await quotePrice(sellerId, { productId, locale: market, positioning });
-      out[positioning] = { price: q.suggested_price, profit: q.profit, margin_percent: q.margin_percent, strategy: q.strategy, warnings: q.warnings };
-    } catch (err) {
-      if (!(err instanceof AppError)) throw err;
-      out[positioning] = { error: err.message };
-    }
-  }
-  const floor = await quotePrice(sellerId, { productId, locale: market });
-  return { margin_floor_price: floor.margin_floor_price, cost_based_price: floor.suggested_price, by_positioning: out };
+  const product = await prisma.product.findFirst({ where: { id: productId, seller_id: sellerId } });
+  if (!product) throw notFound("Product");
+  return pricingAtPositions(sellerId, product, market, await latestResearch(sellerId, productId, market));
 }
 
 /** Saved research per market, each with price suggestions. */
@@ -27,9 +19,7 @@ export const GET = handler(async (req, ctx: { params: Promise<{ id: string }> })
   const seller = await requireSeller(req);
   const productId = await routeId(ctx.params, "Product");
   const saved = await savedMarketResearch(seller.sellerId, productId);
-  const markets = await Promise.all(
-    saved.map(async (r) => ({ ...r, pricing: await suggestions(seller.sellerId, productId, r.market).catch(() => null) })),
-  );
+  const markets = await Promise.all(saved.map(async (r) => ({ ...r, pricing: await suggestions(seller.sellerId, productId, r.market).catch(() => null) })));
   return json({ markets });
 });
 

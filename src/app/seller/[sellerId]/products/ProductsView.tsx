@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useId, useMemo, useRef, useState } from "react";
+import { DraftMarketPrices } from "./DraftMarketPrices";
 import { BodyPortal } from "@/components/BodyPortal";
 import { api, type Money } from "@/components/api";
 import { useI18n } from "@/components/i18n/I18nProvider";
@@ -253,6 +254,20 @@ function NewProductDrawer({ onClose, onCreated, onAskAi }: { onClose: () => void
               <input className={field} value={form.size} onChange={(e) => setForm({ ...form, size: e.target.value })} placeholder="12 oz" />
             </label>
           </div>
+          <DraftMarketPrices
+            facts={{
+              title: form.title,
+              description: form.description,
+              cost: form.cost,
+              shipping: form.shipping,
+              currency: form.currency,
+              margin: form.margin,
+              attributes: { ...(form.material.trim() ? { material: form.material.trim() } : {}), ...(form.size.trim() ? { size: form.size.trim() } : {}) },
+            }}
+            markets={MARKETS}
+            defaultMarket={form.source_locale}
+            onSetMargin={(margin) => setForm((f) => ({ ...f, margin }))}
+          />
           {error && (
             <p role="alert" className="rounded-md bg-alert-soft p-3 text-sm text-alert-ink">
               {error}
