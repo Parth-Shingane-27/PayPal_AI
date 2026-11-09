@@ -14,6 +14,18 @@ export function lastMonthKeys(now: Date, n: number): string[] {
   return out;
 }
 
+/**
+ * How far through a month `now` is. Only the current month is partial: its
+ * figures cover days_elapsed of days_in_month, so a chart must not present it
+ * as a finished month.
+ */
+export function monthProgress(key: string, now: Date): { partial: boolean; days_elapsed: number; days_in_month: number } {
+  const [y, m] = key.split("-").map(Number) as [number, number];
+  const days_in_month = new Date(Date.UTC(y, m, 0)).getUTCDate();
+  const partial = key === monthKey(now);
+  return { partial, days_elapsed: partial ? now.getUTCDate() : days_in_month, days_in_month };
+}
+
 /** Index 0..weeks-1 of the week (oldest first) a date falls in, counting back from `now`; -1 if outside. */
 export function weekIndex(d: Date, now: Date, weeks: number): number {
   const age = Math.floor((now.getTime() - d.getTime()) / (7 * DAY));

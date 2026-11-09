@@ -18,6 +18,8 @@ export const GET = handler(async (req, ctx: { params: Promise<{ id: string }> })
       shipping: money(p.shipping_minor, p.cost_currency, seller.locale),
       margin_percent: p.margin_bps / 100,
       attributes: p.attributes,
+      image_url: p.image_url,
+      category: p.category,
     },
     listings: p.listings.map((l) => ({
       id: l.id,

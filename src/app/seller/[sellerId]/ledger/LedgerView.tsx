@@ -7,6 +7,7 @@ import { api, type Money as MoneyT } from "@/components/api";
 import { Grid } from "@/components/grid/Grid";
 import { bpsCol, countCol, countryCol, dateCol, feeBarCol, marketCol, moneyCol, productCol, sparkCol, statusCol, threadCol } from "@/components/grid/columns";
 import { useI18n } from "@/components/i18n/I18nProvider";
+import { shortId } from "@/lib/format";
 import { useBase } from "@/lib/use-base";
 import { DASHBOARD_PERIODS, type DashboardPeriod } from "@/lib/periods";
 import type { MessageKey } from "@/lib/i18n/messages";
@@ -160,7 +161,7 @@ export function LedgerView({ period, tab }: { period: DashboardPeriod; tab: Ledg
 
   const salesCols = useMemo<ColDef<SaleRow>[]>(
     () => [
-      productCol<SaleRow>("items", "image_url", (r) => `${r.units === 1 ? t("cell.item") : t("cell.items", { n: r.units })}, ${t("cell.orderShort", { id: r.order_id.slice(0, 8) })}`, { headerName: t("col.order") }),
+      productCol<SaleRow>("items", "image_url", (r) => `${r.units === 1 ? t("cell.item") : t("cell.items", { n: r.units })}, ${t("cell.orderShort", { id: shortId(r.order_id) })}`, { headerName: t("col.order") }),
       dateCol<SaleRow>("date", t("col.date"), { sort: "desc", locale }),
       statusCol<SaleRow>("status", t),
       { field: "buyer", headerName: t("col.buyer"), width: 160 },

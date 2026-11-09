@@ -160,7 +160,7 @@ export function sparkCol<T extends Row>(field: keyof T & string, headerName: str
   return {
     field: field as ColDef<T>["field"],
     headerName,
-    width: 130,
+    width: 150,
     sortable: false,
     filter: false,
     valueFormatter: (p: ValueFormatterParams<T, number[]>) => (Array.isArray(p.value) ? p.value.join(" ") : ""),
@@ -168,7 +168,7 @@ export function sparkCol<T extends Row>(field: keyof T & string, headerName: str
     cellRenderer: (p: CustomCellRendererProps<T, number[]>) =>
       p.value && p.data && !p.node.rowPinned ? (
         <span className="flex h-full items-center">
-          <Sparkline values={p.value} label={label(p.data)} width={100} height={26} />
+          <Sparkline values={p.value} label={label(p.data)} width={90} height={26} />
         </span>
       ) : null,
   };

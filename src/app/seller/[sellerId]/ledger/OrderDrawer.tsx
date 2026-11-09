@@ -7,7 +7,7 @@ import { IconClose, IconMessages } from "@/components/icons";
 import { useI18n } from "@/components/i18n/I18nProvider";
 import { RefundForm } from "@/components/RefundForm";
 import { FeeBar, MarketStamp, Money, ProductThumb, StatusStamp } from "@/components/ui";
-import { formatDate } from "@/lib/format";
+import { formatDate, shortId } from "@/lib/format";
 import { useBase } from "@/lib/use-base";
 
 type Details = {
@@ -117,7 +117,7 @@ export function OrderDrawer({ row, onClose, onChanged }: { row: DrawerOrder | nu
         <div className="flex flex-col gap-6 p-5">
           <div className="flex items-center justify-between">
             <StatusStamp status={row.status} />
-            <span className="num text-xs text-ink-3">{t("drawer.order", { id: row.order_id.slice(0, 8) })}</span>
+            <span className="num text-xs text-ink-3">{t("drawer.order", { id: shortId(row.order_id) })}</span>
           </div>
 
           {error && <p className="rounded-md bg-alert-soft p-3 text-sm text-alert-ink">{error}</p>}

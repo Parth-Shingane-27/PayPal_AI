@@ -3,6 +3,7 @@
 import type { ColDef } from "ag-grid-community";
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { OpsTrendChart } from "@/components/agcharts/Charts";
 import { AskAi } from "@/components/AskAi";
 import { api, type Money as MoneyT } from "@/components/api";
 import { ChatPanel } from "@/components/ChatPanel";
@@ -11,6 +12,7 @@ import { Grid } from "@/components/grid/Grid";
 import { countryCol, dateCol, marketCol, moneyCol, productCol, statusCol, threadCol } from "@/components/grid/columns";
 import { IconCheck, IconMessages, IconPulse } from "@/components/icons";
 import { useI18n } from "@/components/i18n/I18nProvider";
+import { shortId } from "@/lib/format";
 import { useBase } from "@/lib/use-base";
 import { DASHBOARD_PERIODS, type DashboardPeriod } from "@/lib/periods";
 import type { MessageKey } from "@/lib/i18n/messages";
@@ -30,6 +32,7 @@ type Summary = {
   waiting_threads: { id: string; subject: string; buyer: string }[];
   pending_approvals: number;
   anomalies: { type: string; severity: "low" | "medium" | "high"; summary: string; count: number; order_id: string | null }[];
+  trend: { week_start: string; orders: number; refunded_orders: number; refund_rate_bps: number | null; declined: number }[];
 };
 
 const STATUSES = ["PAID", "PARTIALLY_REFUNDED", "REFUNDED", "PENDING_PAYMENT"] as const;
@@ -80,21 +83,18 @@ export function OperationsView({ period }: { period: DashboardPeriod }) {
 
   const cols = useMemo<ColDef<Row>[]>(
     () => [
-      productCol<Row>("items", "image_url", (r) => `${r.units === 1 ? t("cell.item") : t("cell.items", { n: r.units })}, ${t("cell.orderShort", { id: r.order_id.slice(0, 8) })}`, { headerName: t("col.order") }),
-      dateCol<Row>("date", t("col.date"), { sort: "desc", locale }),
-      statusCol<Row>("status", t),
-      { field: "buyer", headerName: t("col.buyer"), width: 160 },
-      countryCol<Row>("buyer_country", t("col.shipsTo")),
-      marketCol<Row>("market", t("col.market")),
-      moneyCol<Row>("gross", t("col.paidByBuyer")),
-      moneyCol<Row>("refunded", t("col.refunded"), { tone: "fee" }),
-      moneyCol<Row>("refundable", t("col.stillRefundable"), { width: 150 }),
-      moneyCol<Row>("net", t("col.reachedYou"), { tone: "net" }),
-      threadCol<Row>("conversation_id", (id) => `${base}/messages?c=${id}`, t),
+      productCol<Row>("items", "image_url", (r) => `${r.units === 1 ? t("cell.item") : t("cell.items", { n: r.units })}, ${t("cell.orderShort", { id: shortId(r.order_id) })}`, { headerName: t("col.order"), width: 250 }),
+      dateCol<Row>("date", t("col.date"), { sort: "desc", locale, width: 124 }),
+      statusCol<Row>("status", t, { width: 150 }),
+      { field: "buyer", headerName: t("col.buyer"), width: 130 },
+      // The figures a seller acts on come first, so they are on screen without scrolling; the rest follow.
+      moneyCol<Row>("gross", t("col.paidByBuyer"), { width: 116 }),
+      moneyCol<Row>("net", t("col.reachedYou"), { tone: "net", width: 116 }),
+      moneyCol<Row>("refundable", t("col.stillRefundable"), { width: 124 }),
       {
         colId: "refund",
         headerName: "",
-        width: 120,
+        width: 104,
         sortable: false,
         filter: false,
         cellRenderer: (p: { data?: Row; node: { rowPinned?: string | null } }) =>
@@ -104,6 +104,10 @@ export function OperationsView({ period }: { period: DashboardPeriod }) {
             </button>
           ) : null,
       },
+      marketCol<Row>("market", t("col.market"), { width: 140 }),
+      countryCol<Row>("buyer_country", t("col.shipsTo"), { width: 100 }),
+      moneyCol<Row>("refunded", t("col.refunded"), { tone: "fee", width: 116 }),
+      threadCol<Row>("conversation_id", (id) => `${base}/messages?c=${id}`, t),
     ],
     [t, locale, base],
   );
@@ -143,7 +147,7 @@ export function OperationsView({ period }: { period: DashboardPeriod }) {
         </p>
       )}
 
-      <div className="grid gap-6 lg:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)]">
+      <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)]">
         <section aria-labelledby="attention" className="min-w-0 rounded-[10px] border border-rule bg-sheet p-4 md:p-5">
           <div className="flex items-baseline justify-between gap-2">
             <h2 id="attention" className="font-display text-xl font-semibold">
@@ -225,6 +229,16 @@ export function OperationsView({ period }: { period: DashboardPeriod }) {
           </label>
         </section>
       </div>
+
+      {s && s.trend.length > 0 && (
+        <section aria-labelledby="trend-title" className="min-w-0 rounded-[10px] border border-rule bg-sheet p-4 md:p-5">
+          <h2 id="trend-title" className="font-display text-xl font-semibold">
+            {t("ops.trend.title")}
+          </h2>
+          <p className="mb-3 text-sm text-ink-3">{t("ops.trend.sub")}</p>
+          <OpsTrendChart weeks={s.trend} title={t("ops.trend.title")} />
+        </section>
+      )}
 
       <section aria-labelledby="orders-title" className="flex flex-col gap-3">
         <div className="flex flex-wrap items-baseline justify-between gap-2">
