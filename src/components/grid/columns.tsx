@@ -7,10 +7,10 @@ import { compareMoney, formatBps, formatCount, formatDate, type MoneyLike } from
 import type { Translate } from "@/lib/i18n/core";
 import type { MessageKey } from "@/lib/i18n/messages";
 import { IconMessages } from "../icons";
-import { CountryStamp, FeeBar, MarketStamp, Money, ProductThumb, Sparkline, StatusStamp } from "../ui";
+import { CountryStamp, FeeBar, MarketStamp, Money, Sparkline, StatusStamp } from "../ui";
 
 /**
- * Column builders shared by the seller and buyer grids. Money cells keep the
+ * Column builders shared by the grids. Money cells keep the
  * Money object as the value (exact minor units for sorting and CSV) and show
  * the server-formatted display string.
  */
@@ -121,38 +121,6 @@ export function bpsCol<T extends Row>(field: keyof T & string, headerName: strin
     valueFormatter: (p: ValueFormatterParams<T, number>) => (typeof p.value === "number" ? formatBps(p.value, digits) : ""),
     cellClass: ["num", "ag-right-aligned-cell"],
     ...rest,
-  };
-}
-
-/** Product cell: generated thumbnail, title, and a quiet second line. */
-export function productCol<T extends Row>(
-  titleField: keyof T & string,
-  imageField: keyof T & string,
-  sub: (row: T) => string,
-  opts: Partial<ColDef<T>> = {},
-): ColDef<T> {
-  return {
-    field: titleField as ColDef<T>["field"],
-    headerName: "Product",
-    pinned: "left",
-    lockPinned: true,
-    lockVisible: true,
-    // Narrower on phones so the pinned column leaves room to scroll the figures.
-    width: typeof window !== "undefined" && window.innerWidth < 640 ? 180 : 300,
-    minWidth: 160,
-    cellRenderer: (p: CustomCellRendererProps<T, string>) => {
-      if (p.node.rowPinned) return <span className="font-semibold">{p.value}</span>;
-      return (
-        <span className="flex h-full items-center gap-2.5 leading-tight">
-          <ProductThumb src={p.data?.[imageField] as string | null} alt="" size={34} />
-          <span className="min-w-0">
-            <span className="block truncate font-medium text-ink">{p.value}</span>
-            <span className="block truncate text-xs text-ink-3">{p.data ? sub(p.data) : ""}</span>
-          </span>
-        </span>
-      );
-    },
-    ...opts,
   };
 }
 

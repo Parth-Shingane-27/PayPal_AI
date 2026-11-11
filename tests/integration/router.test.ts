@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { classifyWithGroq } from "@/server/agents/router";
 import { prisma } from "@/server/db";
-import { makeSeller, resetDb } from "../helpers/db";
+import { makeFreelancer, resetDb } from "../helpers/db";
 
 // Replace the Groq client with a stub; keep the SDK's real error classes.
 const create = vi.hoisted(() => vi.fn());
@@ -32,16 +32,16 @@ const completion = (content: string) => ({
 
 describe("Groq router", () => {
   it("sends a strict json_schema request and returns the validated route", async () => {
-    const seller = await makeSeller();
+    const freelancer = await makeFreelancer();
     create.mockResolvedValue(completion(JSON.stringify({ agent: "TREASURY", reason: "Asks about payouts." })));
-    const route = await classifyWithGroq("When should I take a payout?", { actor: { type: "SELLER", sellerId: seller.id } });
+    const route = await classifyWithGroq("When should I take a payout?", { actor: { type: "FREELANCER", freelancerId: freelancer.id } });
     expect(route).toEqual({ agent: "TREASURY", reason: "Asks about payouts." });
 
     const req = create.mock.calls[0]![0];
     expect(req).toMatchObject({ model: "openai/gpt-oss-20b", reasoning_effort: "low", response_format: { type: "json_schema", json_schema: { name: "route", strict: true } } });
     expect(req.response_format.json_schema.schema).toEqual({
       type: "object",
-      properties: { agent: { type: "string", enum: ["LISTING", "TREASURY", "OPERATIONS"] }, reason: { type: "string" } },
+      properties: { agent: { type: "string", enum: ["PROFILE", "TREASURY", "PROJECTS"] }, reason: { type: "string" } },
       required: ["agent", "reason"],
       additionalProperties: false,
     });
@@ -51,7 +51,7 @@ describe("Groq router", () => {
   });
 
   it("rejects output outside the schema", async () => {
-    create.mockResolvedValue(completion(JSON.stringify({ agent: "SHOPPING", reason: "x" })));
+    create.mockResolvedValue(completion(JSON.stringify({ agent: "HIRING", reason: "x" })));
     await expect(classifyWithGroq("hi", { actor: { type: "SYSTEM" } })).rejects.toMatchObject({ code: "INVALID_INPUT" });
     create.mockResolvedValue(completion("not json"));
     await expect(classifyWithGroq("hi", { actor: { type: "SYSTEM" } })).rejects.toMatchObject({ code: "INVALID_INPUT" });

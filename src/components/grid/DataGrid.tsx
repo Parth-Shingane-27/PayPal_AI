@@ -75,7 +75,7 @@ export type DataGridProps<T> = {
   /** Rows summarised in a pinned footer, recomputed from the filtered rows. */
   totals?: (rows: T[]) => Partial<T> | null;
   exportName: string;
-  /** Words for the quick filter placeholder, e.g. "buyer, product, market". */
+  /** Words for the quick filter placeholder, e.g. "client, service, market". */
   searchHint: string;
   emptyMessage: string;
   pageSize?: number;

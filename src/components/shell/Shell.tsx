@@ -7,7 +7,6 @@ import { api } from "../api";
 import {
   IconBag,
   IconBox,
-  IconCart,
   IconCheck,
   IconClose,
   IconCoins,
@@ -19,9 +18,9 @@ import {
   IconPulse,
   IconReceipt,
   IconSpark,
-  IconTruck,
 } from "../icons";
 import { AssistantDock } from "../assistant/AssistantDock";
+import type { DockRole } from "../assistant/route-context";
 import { AssistantProvider } from "../assistant/AssistantContext";
 import { LanguagePicker, useT } from "../i18n/I18nProvider";
 import { LogoutButton } from "../LogoutButton";
@@ -29,18 +28,17 @@ import { ThemeToggle } from "./ThemeToggle";
 
 const ICONS = {
   overview: IconOverview,
-  ledger: IconLedger,
   messages: IconMessages,
-  products: IconBox,
-  treasury: IconCoins,
-  operations: IconTruck,
+  services: IconBox,
+  quotes: IconJournal,
+  briefs: IconJournal,
+  projects: IconLedger,
+  earnings: IconCoins,
+  invoices: IconReceipt,
+  find: IconBag,
   approvals: IconCheck,
   activity: IconPulse,
   assistant: IconSpark,
-  journal: IconJournal,
-  shop: IconBag,
-  cart: IconCart,
-  orders: IconReceipt,
 };
 export type IconKey = keyof typeof ICONS;
 export type NavLink = { href: string; label: string; icon: IconKey; exact?: boolean; badge?: "unread"; /** A fixed count (e.g. new findings), rendered like the unread badge. */ count?: number };
@@ -50,14 +48,14 @@ function isActive(pathname: string, l: NavLink) {
 }
 
 /** Polls the unread count so the badge moves when the other side replies. */
-function useUnread(initial: number) {
+function useUnread(initial: number, url: string) {
   const [unread, setUnread] = useState(initial);
   const pathname = usePathname();
   useEffect(() => {
     let alive = true;
     const tick = () => {
       if (document.visibilityState !== "visible") return;
-      void api<{ unread: number }>("/api/messages/unread")
+      void api<{ unread: number }>(url)
         .then((r) => alive && setUnread(r.unread))
         .catch(() => {});
     };
@@ -69,7 +67,7 @@ function useUnread(initial: number) {
       window.clearInterval(id);
       window.removeEventListener("gc:unread-changed", tick);
     };
-  }, [pathname]);
+  }, [pathname, url]);
   return unread;
 }
 
@@ -86,13 +84,13 @@ function Badge({ n, label }: { n: number; label?: string }) {
 
 function Brand({ href }: { href: string }) {
   return (
-    <Link href={href} className="flex items-center gap-2.5 rounded-md" aria-label="GlobalCart, switch account">
+    <Link href={href} className="flex items-center gap-2.5 rounded-md" aria-label="GlobalGig, switch account">
       <svg viewBox="0 0 32 32" className="h-8 w-8 shrink-0" aria-hidden>
         <circle cx="16" cy="16" r="15" fill="#c99a2e" />
         <circle cx="16" cy="16" r="11" fill="none" stroke="#1a1514" strokeOpacity="0.55" strokeWidth="1.2" strokeDasharray="2 2.2" />
         <path d="M9 16h14M16 9c2.4 2 3.5 4.3 3.5 7s-1.1 5-3.5 7c-2.4-2-3.5-4.3-3.5-7s1.1-5 3.5-7z" fill="none" stroke="#1a1514" strokeWidth="1.8" />
       </svg>
-      <span className="font-display text-[1.35rem] font-bold leading-none tracking-[-0.02em] text-ink">GlobalCart</span>
+      <span className="font-display text-[1.35rem] font-bold leading-none tracking-[-0.02em] text-ink">GlobalGig</span>
     </Link>
   );
 }
@@ -142,7 +140,7 @@ function Who({ name, sub }: { name: string; sub: string }) {
 }
 
 /**
- * App frame. Sellers get a left rail (dense back office); buyers get a top bar.
+ * App frame. Freelancers get a left rail (dense back office); clients get a top bar.
  * Below md both collapse to a top bar with a drawer.
  */
 export function Shell({
@@ -161,11 +159,11 @@ export function Shell({
   sub: string;
   initialUnread: number;
   tools?: React.ReactNode;
-  /** The assistant side panel: who it is for, and for buyers the PayPal client id and market their chat uses. */
-  assistant: { role: "SELLER" | "BUYER"; paypalClientId?: string | null; market?: string };
+  /** The assistant side panel: who it is for, and for clients the PayPal client id and market their chat uses. */
+  assistant: { role: DockRole; paypalClientId?: string | null; market?: string };
   children: React.ReactNode;
 }) {
-  const unread = useUnread(initialUnread);
+  const unread = useUnread(initialUnread, "/api/threads?count=unread");
   const t = useT();
   const [open, setOpen] = useState(false);
   useEffect(() => {
@@ -230,7 +228,7 @@ export function Shell({
             </div>
             <LanguagePicker compact />
           </div>
-          <nav aria-label="Seller" className="flex-1 overflow-y-auto">
+          <nav aria-label="Main" className="flex-1 overflow-y-auto">
             <LinkList links={links} unread={unread} />
           </nav>
           <div className="flex flex-col gap-1 border-t border-rule px-2 pt-3">
@@ -257,7 +255,7 @@ export function Shell({
           <header className="sticky top-0 z-30 hidden border-b border-rule bg-sheet/95 backdrop-blur md:block">
             <div className="@container mx-auto flex max-w-7xl items-center gap-4 px-6 py-2">
               <Brand href="/login" />
-              <nav aria-label="Buyer" className="min-w-0 flex-1 overflow-x-auto">
+              <nav aria-label="Main" className="min-w-0 flex-1 overflow-x-auto">
                 <LinkList links={links} unread={unread} dense />
               </nav>
               {tools}

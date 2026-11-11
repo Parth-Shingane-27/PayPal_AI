@@ -229,9 +229,9 @@ export function AssistantDock({ chrome }: { chrome: number }) {
 
           <div id="assistant-chat" role={showAgents ? "tabpanel" : undefined} className="min-h-0 flex-1 border-t border-rule">
             <ChatPanel
-              key={`${a.active}|${scope.productId ?? ""}|${scope.resumeKey ?? ""}`}
+              key={`${a.active}|${scope.subjectId ?? ""}|${scope.resumeKey ?? ""}`}
               agent={a.active}
-              productId={scope.productId}
+              subjectId={scope.subjectId}
               resumeKey={scope.resumeKey}
               paypalClientId={a.paypalClientId}
               onResult={a.notifyResult}

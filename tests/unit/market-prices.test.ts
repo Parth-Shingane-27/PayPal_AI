@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 import { amountAppearsIn, anchorFor, convertDecimalToMinor, normalizeUrl, numbersIn, positionOf, priceStats } from "@/server/domain/market-prices";
-import { suggestPrice } from "@/server/domain/pricing";
 
 describe("priceStats", () => {
   it("returns null for no usable prices", () => {
@@ -68,27 +67,5 @@ describe("price evidence", () => {
   it("converts any currency's decimal amount into minor units", () => {
     expect(convertDecimalToMinor("1499", 0.012, 2)).toBe(1799); // INR -> USD cents
     expect(convertDecimalToMinor("25.00", 160, 0)).toBe(4000); // EUR -> JPY
-  });
-});
-
-describe("suggestPrice with a market anchor", () => {
-  const sale = { currency: "EUR", marketCountry: "DE", sellerCountry: "DE", sellerCurrency: "EUR", platformBps: 500 };
-  it("aims at the anchor when it is above the margin floor", () => {
-    const r = suggestPrice({ landedCostMinor: 1000, marginBps: 3000, rounding: "x99", sale, marketAnchorMinor: 3450 });
-    expect(r.strategy).toBe("MARKET_ANCHOR");
-    expect(r.price_minor).toBe(3499);
-    expect(r.warnings).toEqual([]);
-  });
-
-  it("never goes below the margin floor", () => {
-    const r = suggestPrice({ landedCostMinor: 3000, marginBps: 3000, rounding: "x99", sale, marketAnchorMinor: 2000 });
-    expect(r.strategy).toBe("MARGIN_FLOOR");
-    expect(r.price_minor).toBeGreaterThanOrEqual(r.floor_price_minor);
-    expect(r.warnings).not.toContain("BELOW_TARGET_MARGIN");
-  });
-
-  it("lets an explicit competitor range win over the anchor", () => {
-    const r = suggestPrice({ landedCostMinor: 1000, marginBps: 3000, rounding: "x99", sale, competitor: { lowMinor: 5000, highMinor: 6000 }, marketAnchorMinor: 3000 });
-    expect(r.strategy).toBe("COMPETITOR_LOW");
   });
 });

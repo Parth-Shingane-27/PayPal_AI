@@ -2,13 +2,13 @@ import { useSyncExternalStore } from "react";
 
 /**
  * State of the assistant side panel: open or collapsed to a rail, and its
- * width. Saved in the browser (`gc-dock-v1`) and mirrored onto <html> as the
+ * width. Saved in the browser (`gg-dock-v1`) and mirrored onto <html> as the
  * `data-dock` attribute and the `--dock-w` CSS variable, which the page layout
  * reads. The inline script in app/layout.tsx applies the same saved state
  * before first paint; keep the key and shape in step with it.
  */
 
-export const DOCK_KEY = "gc-dock-v1";
+export const DOCK_KEY = "gg-dock-v1";
 /** Narrowest the panel can be dragged to. */
 export const DOCK_MIN = 280;
 /** Width of the collapsed rail (3rem). */

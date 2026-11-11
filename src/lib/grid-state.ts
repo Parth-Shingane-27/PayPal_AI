@@ -23,7 +23,7 @@ export function parseGridState<T>(raw: string | null): T | null {
 
 export function loadGridState<T>(key: string): T | null {
   try {
-    return parseGridState<T>(localStorage.getItem(`gc-grid:${key}`));
+    return parseGridState<T>(localStorage.getItem(`gg-grid:${key}`));
   } catch {
     return null;
   }
@@ -31,7 +31,7 @@ export function loadGridState<T>(key: string): T | null {
 
 export function saveGridState<T>(key: string, state: T): void {
   try {
-    localStorage.setItem(`gc-grid:${key}`, serializeGridState(state));
+    localStorage.setItem(`gg-grid:${key}`, serializeGridState(state));
   } catch {
     // Storage full or blocked: the layout simply isn't remembered.
   }
@@ -39,7 +39,7 @@ export function saveGridState<T>(key: string, state: T): void {
 
 export function clearGridState(key: string): void {
   try {
-    localStorage.removeItem(`gc-grid:${key}`);
+    localStorage.removeItem(`gg-grid:${key}`);
   } catch {
     // ignore
   }

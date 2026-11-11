@@ -104,7 +104,7 @@ export function amountAppearsIn(amount: string, text: string): boolean {
 }
 
 /**
- * Converts a decimal amount in any currency (including ones GlobalCart does
+ * Converts a decimal amount in any currency (including ones GlobalGig does
  * not sell in, like INR) to minor units of `toExponent`, rounded half up.
  */
 export function convertDecimalToMinor(amount: string, rate: number, toExponent: number): number {

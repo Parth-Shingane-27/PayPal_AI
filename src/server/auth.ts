@@ -8,23 +8,31 @@ import { AppError } from "./errors";
 /**
  * Session = HMAC-SHA256 signed cookie: base64url(JSON payload) + "." + base64url(mac).
  * The payload names the actor; every service re-checks ownership by id. A
- * buyer's chosen market lives in the same signed cookie.
+ * client's chosen market lives in the same signed cookie.
  */
 
-export const SESSION_COOKIE = "gc_session";
+export const SESSION_COOKIE = "gg_session";
 const SESSION_TTL_S = 7 * 24 * 60 * 60;
 
 const payloadSchema = z.object({
-  role: z.enum(["SELLER", "BUYER"]),
+  role: z.enum(["FREELANCER", "CLIENT"]),
   id: z.uuid(),
   market: z.string().nullable(),
   exp: z.number().int(),
 });
 type SessionPayload = z.infer<typeof payloadSchema>;
 
+/** The signed-in account. A client's market can be changed from the market picker; a freelancer works in their own locale. */
 export type Principal =
-  | { role: "SELLER"; sellerId: string; name: string; locale: string }
-  | { role: "BUYER"; buyerId: string; name: string; market: string };
+  | { role: "FREELANCER"; freelancerId: string; name: string; locale: string; currency: string; country: string }
+  | { role: "CLIENT"; clientId: string; name: string; market: string; country: string };
+
+/** The owner a service expects, from a principal. */
+export function gigOwnerOf(p: Principal) {
+  return p.role === "FREELANCER"
+    ? { type: "FREELANCER" as const, freelancerId: p.freelancerId, locale: p.locale }
+    : { type: "CLIENT" as const, clientId: p.clientId, locale: p.market };
+}
 
 function mac(data: string): string {
   return createHmac("sha256", coreConfig().SESSION_SECRET).update(data).digest("base64url");
@@ -51,18 +59,20 @@ export function verifySession(token: string | undefined | null, now = Date.now()
   }
 }
 
-/** Loads the actor named by a verified token; null if it no longer exists. */
+/** Loads the freelancer or client named by a verified token; null if it no longer exists. */
 export async function principalFromToken(token: string | undefined | null): Promise<Principal | null> {
   const p = verifySession(token);
   if (!p) return null;
-  if (p.role === "SELLER") {
-    const s = await prisma.seller.findUnique({ where: { id: p.id } });
-    return s ? { role: "SELLER", sellerId: s.id, name: s.name, locale: s.locale } : null;
+  if (p.role === "FREELANCER") {
+    const f = await prisma.freelancer.findUnique({ where: { id: p.id } });
+    return f ? { role: "FREELANCER", freelancerId: f.id, name: f.name, locale: f.locale, currency: f.currency, country: f.country } : null;
   }
-  const b = await prisma.buyer.findUnique({ where: { id: p.id } });
-  if (!b) return null;
-  const market = p.market && isMarketLocale(p.market) ? p.market : b.locale;
-  return { role: "BUYER", buyerId: b.id, name: b.name, market };
+  if (p.role === "CLIENT") {
+    const c = await prisma.client.findUnique({ where: { id: p.id } });
+    if (!c) return null;
+    return { role: "CLIENT", clientId: c.id, name: c.company_name ?? c.name, market: p.market && isMarketLocale(p.market) ? p.market : c.locale, country: c.country };
+  }
+  return null;
 }
 
 function readCookie(header: string | null, name: string): string | undefined {
@@ -74,25 +84,30 @@ function readCookie(header: string | null, name: string): string | undefined {
   return undefined;
 }
 
-async function principalFromRequest(req: Request): Promise<Principal | null> {
-  return principalFromToken(readCookie(req.headers.get("cookie"), SESSION_COOKIE));
-}
-
 export async function requirePrincipal(req: Request): Promise<Principal> {
-  const p = await principalFromRequest(req);
+  const p = await principalFromToken(readCookie(req.headers.get("cookie"), SESSION_COOKIE));
   if (!p) throw new AppError("UNAUTHENTICATED", "Please sign in.");
   return p;
 }
 
-export async function requireSeller(req: Request): Promise<Extract<Principal, { role: "SELLER" }>> {
+/** Any signed-in account and the agent-session owner it maps to. */
+export async function requireChatOwner(req: Request): Promise<{
+  principal: Principal;
+  owner: { type: "FREELANCER"; freelancerId: string } | { type: "CLIENT"; clientId: string };
+}> {
+  const principal = await requirePrincipal(req);
+  return { principal, owner: principal.role === "FREELANCER" ? { type: "FREELANCER", freelancerId: principal.freelancerId } : { type: "CLIENT", clientId: principal.clientId } };
+}
+
+export async function requireFreelancer(req: Request): Promise<Extract<Principal, { role: "FREELANCER" }>> {
   const p = await requirePrincipal(req);
-  if (p.role !== "SELLER") throw new AppError("FORBIDDEN", "This page is for sellers.");
+  if (p.role !== "FREELANCER") throw new AppError("FORBIDDEN", "This is for freelancers.");
   return p;
 }
 
-export async function requireBuyer(req: Request): Promise<Extract<Principal, { role: "BUYER" }>> {
+export async function requireClient(req: Request): Promise<Extract<Principal, { role: "CLIENT" }>> {
   const p = await requirePrincipal(req);
-  if (p.role !== "BUYER") throw new AppError("FORBIDDEN", "This page is for buyers.");
+  if (p.role !== "CLIENT") throw new AppError("FORBIDDEN", "This is for clients.");
   return p;
 }
 

@@ -4,7 +4,7 @@ import { closeQueues } from "@/server/queue";
 import { startWorkers } from "./jobs";
 import { buildServer } from "./server";
 
-/** GlobalCart worker: PayPal webhooks (Fastify) + BullMQ jobs (webhooks, embeddings, payouts). */
+/** GlobalGig worker: PayPal webhooks (Fastify) + BullMQ jobs (webhooks, embeddings, payouts). */
 async function main() {
   const { WORKER_PORT } = workerConfig();
   const stopWorkers = startWorkers();

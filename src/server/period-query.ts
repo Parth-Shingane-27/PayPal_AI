@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { PERIOD_PRESETS, resolvePeriod } from "./services/ledger";
+import { PERIOD_PRESETS, resolvePeriod } from "./domain/period";
 
 const periodQuery = z.object({ period: z.enum(PERIOD_PRESETS).default("last_90_days") });
 

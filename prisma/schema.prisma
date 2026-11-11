@@ -15,21 +15,7 @@ datasource db {
 // Enums
 // ---------------------------------------------------------------------------
 
-enum ListingStatus {
-  DRAFT
-  PUBLISHED
-  ARCHIVED
-}
-
-enum OrderStatus {
-  CART
-  PENDING_PAYMENT
-  PAID
-  PARTIALLY_REFUNDED
-  REFUNDED
-}
-
-/// CREATED: PayPal order exists, buyer has not paid. PENDING: capture pending
+/// CREATED: PayPal order exists, client has not paid. PENDING: capture pending
 /// at PayPal. Only CREATED and PENDING may move forward.
 enum PaymentStatus {
   CREATED
@@ -48,6 +34,11 @@ enum RefundStatus {
   FAILED
 }
 
+enum ConversationStatus {
+  OPEN
+  CLOSED
+}
+
 enum PayoutScheduleStatus {
   PROPOSED
   APPROVED
@@ -64,16 +55,16 @@ enum PayoutStatus {
 }
 
 enum AgentName {
-  LISTING
-  SHOPPING
   TREASURY
-  OPERATIONS
+  PROFILE
+  HIRING
+  PROJECTS
 }
 
 enum ActorType {
-  SELLER
-  BUYER
   SYSTEM
+  FREELANCER
+  CLIENT
 }
 
 enum AgentSessionStatus {
@@ -90,7 +81,7 @@ enum Severity {
 }
 
 /// NEW: not yet seen. SEEN: seen. SNOOZED: hidden until snoozed_until.
-/// DISMISSED: seller does not want it. ACTED: a proposal was made from it.
+/// DISMISSED: freelancer does not want it. ACTED: a proposal was made from it.
 /// RESOLVED: the detector no longer fires.
 enum FindingStatus {
   NEW
@@ -117,11 +108,6 @@ enum ActionStatus {
   EXECUTION_FAILED
 }
 
-enum ConversationStatus {
-  OPEN
-  CLOSED
-}
-
 enum WebhookStatus {
   RECEIVED
   PROCESSED
@@ -133,367 +119,17 @@ enum WebhookStatus {
 // People
 // ---------------------------------------------------------------------------
 
-model Seller {
-  id                    String   @id @default(uuid(7)) @db.Uuid
-  name                  String
-  email                 String   @unique
-  /// PayPal account that receives payouts.
-  paypal_email          String
-  /// ISO 3166-1 alpha-2, used to decide whether a sale is international.
-  country               String   @db.Char(2)
-  /// Home currency: a listing in another currency carries a conversion spread.
-  currency              String   @db.Char(3)
-  /// UI and agent reply language, e.g. "en-US", "de-DE".
-  locale                String
-  /// Opt-in: the Treasury agent may draft payout proposals by itself (still approved by the seller).
-  auto_payout_proposals Boolean  @default(false)
-  created_at            DateTime @default(now()) @db.Timestamptz(3)
-
-  products         Product[]
-  listings         Listing[]
-  orders           Order[]
-  payments         Payment[]
-  refunds          Refund[]
-  payout_schedules PayoutSchedule[]
-  payouts          Payout[]
-  agent_sessions   AgentSession[]
-  agent_actions    AgentAction[]
-  conversations    Conversation[]
-  findings         Finding[]
-  market_research  MarketPriceResearch[]
-
-  @@map("sellers")
-}
-
-model Buyer {
-  id         String   @id @default(uuid(7)) @db.Uuid
-  name       String
-  email      String   @unique
-  /// Default market; the session can override it from the market picker.
-  locale     String
-  country    String   @db.Char(2)
-  created_at DateTime @default(now()) @db.Timestamptz(3)
-
-  orders         Order[]
-  agent_sessions AgentSession[]
-  conversations  Conversation[]
-
-  @@map("buyers")
-}
-
 // ---------------------------------------------------------------------------
 // Catalogue
 // ---------------------------------------------------------------------------
-
-model Product {
-  id             String   @id @default(uuid(7)) @db.Uuid
-  seller_id      String   @db.Uuid
-  sku            String
-  /// Source-language title and description, written by the seller.
-  title          String
-  description    String
-  source_locale  String
-  cost_minor     Int
-  cost_currency  String   @db.Char(3)
-  /// Shipping cost to any market, in cost_currency. Prices include shipping.
-  shipping_minor Int      @default(0)
-  /// Target profit as a share of the selling price, in basis points.
-  margin_bps     Int
-  /// Facts about the product (weight_kg, dimensions_cm, material, ...).
-  attributes     Json     @default("{}")
-  image_url      String?
-  /// Catalogue facts shown on the dashboards.
-  category       String?
-  stock          Int      @default(0)
-  rating_avg     Float?
-  rating_count   Int      @default(0)
-  created_at     DateTime @default(now()) @db.Timestamptz(3)
-  updated_at     DateTime @updatedAt @db.Timestamptz(3)
-
-  seller          Seller                @relation(fields: [seller_id], references: [id])
-  listings        Listing[]
-  conversations   Conversation[]
-  market_research MarketPriceResearch[]
-
-  @@unique([seller_id, sku])
-  @@index([seller_id])
-  @@map("products")
-}
-
-model Listing {
-  id           String                       @id @default(uuid(7)) @db.Uuid
-  product_id   String                       @db.Uuid
-  seller_id    String                       @db.Uuid
-  locale       String
-  currency     String                       @db.Char(3)
-  title        String
-  description  String
-  seo_title    String
-  price_minor  Int
-  status       ListingStatus                @default(DRAFT)
-  /// The suggest_price result the price came from (null if set by hand).
-  pricing      Json?
-  embedding    Unsupported("vector(1024)")?
-  embedded_at  DateTime?                    @db.Timestamptz(3)
-  published_at DateTime?                    @db.Timestamptz(3)
-  created_at   DateTime                     @default(now()) @db.Timestamptz(3)
-  updated_at   DateTime                     @updatedAt @db.Timestamptz(3)
-
-  product     Product            @relation(fields: [product_id], references: [id])
-  seller      Seller             @relation(fields: [seller_id], references: [id])
-  order_items OrderItem[]
-  daily_stats ListingDailyStat[]
-
-  @@unique([product_id, locale])
-  @@index([locale, status])
-  @@index([seller_id])
-  @@map("listings")
-}
-
-/// One market price check for a product in one market: prices observed in
-/// online shops (web search) and on GlobalCart, converted into the market
-/// currency by code. Kept as history; pricing uses the newest fresh one.
-model MarketPriceResearch {
-  id          String   @id @default(uuid(7)) @db.Uuid
-  seller_id   String   @db.Uuid
-  /// Null while the product is still being added (research from the add form);
-  /// linked by query_hash when the product is created.
-  product_id  String?  @db.Uuid
-  /// Hash of the product's title and description, so research from the add form carries over to the product.
-  query_hash  String?
-  locale      String
-  /// Market currency every amount in `result` is converted into.
-  currency    String   @db.Char(3)
-  /// Offers, stats, sources and notes, as returned to the UI and the agent.
-  result      Json
-  /// Number of web offers kept after validation (0 = nothing usable found).
-  offer_count Int
-  created_at  DateTime @default(now()) @db.Timestamptz(3)
-
-  seller  Seller   @relation(fields: [seller_id], references: [id])
-  product Product? @relation(fields: [product_id], references: [id], onDelete: Cascade)
-
-  @@index([product_id, locale, created_at])
-  @@index([seller_id, query_hash, locale, created_at])
-  @@map("market_price_research")
-}
 
 // ---------------------------------------------------------------------------
 // Orders and money
 // ---------------------------------------------------------------------------
 
-/// One seller and one currency per order. A cart is an order in status CART,
-/// at most one per (buyer, seller, currency), enforced by locking the buyer row.
-model Order {
-  id         String      @id @default(uuid(7)) @db.Uuid
-  buyer_id   String      @db.Uuid
-  seller_id  String      @db.Uuid
-  currency   String      @db.Char(3)
-  /// Market the order was placed in, e.g. "ja-JP".
-  locale     String
-  status     OrderStatus @default(CART)
-  /// Shipping details returned by PayPal at capture.
-  shipping   Json?
-  paid_at    DateTime?   @db.Timestamptz(3)
-  created_at DateTime    @default(now()) @db.Timestamptz(3)
-  updated_at DateTime    @updatedAt @db.Timestamptz(3)
-
-  buyer         Buyer          @relation(fields: [buyer_id], references: [id])
-  seller        Seller         @relation(fields: [seller_id], references: [id])
-  items         OrderItem[]
-  payments      Payment[]
-  refunds       Refund[]
-  conversations Conversation[]
-
-  @@index([buyer_id, status])
-  @@index([seller_id, status])
-  @@map("orders")
-}
-
-model OrderItem {
-  id               String @id @default(uuid(7)) @db.Uuid
-  order_id         String @db.Uuid
-  listing_id       String @db.Uuid
-  /// Snapshot of the listing at the time it was added / checked out.
-  title            String
-  sku              String
-  unit_price_minor Int
-  quantity         Int
-
-  order   Order   @relation(fields: [order_id], references: [id], onDelete: Cascade)
-  listing Listing @relation(fields: [listing_id], references: [id])
-
-  @@unique([order_id, listing_id])
-  @@map("order_items")
-}
-
-/// One row per PayPal order attempt. Fee columns are filled at capture.
-model Payment {
-  id                  String        @id @default(uuid(7)) @db.Uuid
-  order_id            String        @db.Uuid
-  /// Denormalised from the order so ledger sums need no join.
-  seller_id           String        @db.Uuid
-  paypal_order_id     String        @unique
-  /// PayPal "payer-action" link, kept so a pending order can be reused.
-  approve_url         String?
-  /// `${orderId}-${uuid}`: used as invoice_id and PayPal-Request-Id.
-  invoice_id          String        @unique
-  status              PaymentStatus @default(CREATED)
-  currency            String        @db.Char(3)
-  gross_minor         Int
-  paypal_fee_minor    Int?
-  /// True when PayPal's fee was missing or in another currency and the
-  /// estimate table was used instead.
-  fee_is_estimate     Boolean       @default(false)
-  platform_fee_minor  Int?
-  fx_cost_minor       Int?
-  net_to_seller_minor Int?
-  capture_id          String?       @unique
-  failure_reason      String?
-  captured_at         DateTime?     @db.Timestamptz(3)
-  created_at          DateTime      @default(now()) @db.Timestamptz(3)
-  updated_at          DateTime      @updatedAt @db.Timestamptz(3)
-
-  order   Order    @relation(fields: [order_id], references: [id])
-  seller  Seller   @relation(fields: [seller_id], references: [id])
-  refunds Refund[]
-
-  @@index([order_id])
-  @@index([seller_id, status])
-  @@index([status])
-  @@map("payments")
-}
-
-model Refund {
-  id                          String       @id @default(uuid(7)) @db.Uuid
-  payment_id                  String       @db.Uuid
-  order_id                    String       @db.Uuid
-  seller_id                   String       @db.Uuid
-  currency                    String       @db.Char(3)
-  amount_minor                Int
-  reason                      String
-  status                      RefundStatus @default(PROPOSED)
-  paypal_refund_id            String?      @unique
-  paypal_fee_returned_minor   Int?
-  platform_fee_returned_minor Int?
-  seller_debit_minor          Int?
-  error                       String?
-  created_at                  DateTime     @default(now()) @db.Timestamptz(3)
-  completed_at                DateTime?    @db.Timestamptz(3)
-
-  payment       Payment       @relation(fields: [payment_id], references: [id])
-  order         Order         @relation(fields: [order_id], references: [id])
-  seller        Seller        @relation(fields: [seller_id], references: [id])
-  agent_actions AgentAction[]
-
-  @@index([seller_id, status])
-  @@index([payment_id])
-  @@map("refunds")
-}
-
-model PayoutSchedule {
-  id         String               @id @default(uuid(7)) @db.Uuid
-  seller_id  String               @db.Uuid
-  currency   String               @db.Char(3)
-  status     PayoutScheduleStatus @default(PROPOSED)
-  created_at DateTime             @default(now()) @db.Timestamptz(3)
-
-  seller        Seller        @relation(fields: [seller_id], references: [id])
-  payouts       Payout[]
-  agent_actions AgentAction[]
-
-  @@index([seller_id])
-  @@map("payout_schedules")
-}
-
-model Payout {
-  id              String       @id @default(uuid(7)) @db.Uuid
-  schedule_id     String       @db.Uuid
-  seller_id       String       @db.Uuid
-  currency        String       @db.Char(3)
-  amount_minor    Int
-  /// Estimated when proposed; replaced by PayPal's actual fee when known.
-  fee_minor       Int
-  fee_is_estimate Boolean      @default(true)
-  receiver_email  String
-  scheduled_for   DateTime     @db.Timestamptz(3)
-  status          PayoutStatus @default(PROPOSED)
-  /// Idempotency key for POST /v1/payments/payouts.
-  sender_batch_id String       @unique
-  paypal_batch_id String?      @unique
-  error           String?
-  completed_at    DateTime?    @db.Timestamptz(3)
-  created_at      DateTime     @default(now()) @db.Timestamptz(3)
-  updated_at      DateTime     @updatedAt @db.Timestamptz(3)
-
-  schedule PayoutSchedule @relation(fields: [schedule_id], references: [id])
-  seller   Seller         @relation(fields: [seller_id], references: [id])
-
-  @@index([seller_id, status])
-  @@map("payouts")
-}
-
 // ---------------------------------------------------------------------------
-// Buyer-seller messaging and listing traffic
+// Client-freelancer messaging and service-page traffic
 // ---------------------------------------------------------------------------
-
-/// A thread between one buyer and one seller, optionally about a product or order.
-model Conversation {
-  id              String             @id @default(uuid(7)) @db.Uuid
-  seller_id       String             @db.Uuid
-  buyer_id        String             @db.Uuid
-  product_id      String?            @db.Uuid
-  order_id        String?            @db.Uuid
-  subject         String
-  status          ConversationStatus @default(OPEN)
-  last_message_at DateTime           @default(now()) @db.Timestamptz(3)
-  /// Messages the seller / buyer has not read yet.
-  seller_unread   Int                @default(0)
-  buyer_unread    Int                @default(0)
-  created_at      DateTime           @default(now()) @db.Timestamptz(3)
-  updated_at      DateTime           @updatedAt @db.Timestamptz(3)
-
-  seller   Seller    @relation(fields: [seller_id], references: [id])
-  buyer    Buyer     @relation(fields: [buyer_id], references: [id])
-  product  Product?  @relation(fields: [product_id], references: [id])
-  order    Order?    @relation(fields: [order_id], references: [id])
-  messages Message[]
-
-  @@index([seller_id, last_message_at])
-  @@index([buyer_id, last_message_at])
-  @@map("conversations")
-}
-
-model Message {
-  id              String    @id @default(uuid(7)) @db.Uuid
-  conversation_id String    @db.Uuid
-  /// SELLER or BUYER.
-  sender          ActorType
-  body            String
-  /// Language the body was written in, e.g. "hi-IN".
-  body_locale     String
-  /// Rendering in the other party's language, when they differ.
-  translation     String?
-  created_at      DateTime  @default(now()) @db.Timestamptz(3)
-
-  conversation Conversation @relation(fields: [conversation_id], references: [id], onDelete: Cascade)
-
-  @@index([conversation_id, created_at])
-  @@map("messages")
-}
-
-/// Daily storefront traffic per listing (views and add-to-cart clicks).
-model ListingDailyStat {
-  listing_id String   @db.Uuid
-  day        DateTime @db.Date
-  views      Int      @default(0)
-  cart_adds  Int      @default(0)
-
-  listing Listing @relation(fields: [listing_id], references: [id], onDelete: Cascade)
-
-  @@id([listing_id, day])
-  @@map("listing_daily_stats")
-}
 
 // ---------------------------------------------------------------------------
 // Agents and audit
@@ -503,8 +139,8 @@ model AgentSession {
   id             String             @id @default(uuid(7)) @db.Uuid
   agent          AgentName
   actor          ActorType
-  seller_id      String?            @db.Uuid
-  buyer_id       String?            @db.Uuid
+  freelancer_id  String?            @db.Uuid
+  client_id      String?            @db.Uuid
   locale         String
   /// The full Claude message history, append-only.
   messages       Json               @default("[]")
@@ -516,46 +152,46 @@ model AgentSession {
   created_at     DateTime           @default(now()) @db.Timestamptz(3)
   updated_at     DateTime           @updatedAt @db.Timestamptz(3)
 
-  seller        Seller?        @relation(fields: [seller_id], references: [id])
-  buyer         Buyer?         @relation(fields: [buyer_id], references: [id])
+  freelancer    Freelancer?    @relation(fields: [freelancer_id], references: [id])
+  client        Client?        @relation(fields: [client_id], references: [id])
   parent        AgentSession?  @relation("Handoff", fields: [parent_id], references: [id])
   children      AgentSession[] @relation("Handoff")
   agent_actions AgentAction[]
 
-  @@index([seller_id])
-  @@index([buyer_id])
+  @@index([freelancer_id])
+  @@index([client_id])
   @@map("agent_sessions")
 }
 
 /// Audit log and approval queue. A proposal is a PENDING_APPROVAL row linked
 /// to a refund or payout schedule, created in the same transaction.
 model AgentAction {
-  id                 String       @id @default(uuid(7)) @db.Uuid
-  kind               ActionKind
-  agent              AgentName?
-  tool               String
-  input              Json
-  output             Json?
-  status             ActionStatus
-  error              String?
-  rationale          String?
-  actor              ActorType
-  actor_id           String?      @db.Uuid
-  seller_id          String?      @db.Uuid
-  session_id         String?      @db.Uuid
-  refund_id          String?      @db.Uuid
-  payout_schedule_id String?      @db.Uuid
-  decided_by         String?      @db.Uuid
-  decided_at         DateTime?    @db.Timestamptz(3)
-  duration_ms        Int?
-  created_at         DateTime     @default(now()) @db.Timestamptz(3)
+  id                            String       @id @default(uuid(7)) @db.Uuid
+  kind                          ActionKind
+  agent                         AgentName?
+  tool                          String
+  input                         Json
+  output                        Json?
+  status                        ActionStatus
+  error                         String?
+  rationale                     String?
+  actor                         ActorType
+  actor_id                      String?      @db.Uuid
+  session_id                    String?      @db.Uuid
+  freelancer_id                 String?      @db.Uuid
+  milestone_refund_id           String?      @db.Uuid
+  freelancer_payout_schedule_id String?      @db.Uuid
+  decided_by                    String?      @db.Uuid
+  decided_at                    DateTime?    @db.Timestamptz(3)
+  duration_ms                   Int?
+  created_at                    DateTime     @default(now()) @db.Timestamptz(3)
 
-  seller          Seller?         @relation(fields: [seller_id], references: [id])
-  session         AgentSession?   @relation(fields: [session_id], references: [id])
-  refund          Refund?         @relation(fields: [refund_id], references: [id])
-  payout_schedule PayoutSchedule? @relation(fields: [payout_schedule_id], references: [id])
+  session                    AgentSession?             @relation(fields: [session_id], references: [id])
+  freelancer                 Freelancer?               @relation(fields: [freelancer_id], references: [id])
+  milestone_refund           MilestoneRefund?          @relation(fields: [milestone_refund_id], references: [id])
+  freelancer_payout_schedule FreelancerPayoutSchedule? @relation(fields: [freelancer_payout_schedule_id], references: [id])
 
-  @@index([seller_id, created_at])
+  @@index([freelancer_id, created_at])
   @@index([session_id, created_at])
   @@index([status])
   @@map("agent_actions")
@@ -578,10 +214,11 @@ model WebhookEvent {
 }
 
 /// A proactive observation by the Treasury or Operations agent. One open row
-/// per (seller_id, fingerprint); see the partial unique index in the migration.
+/// per (freelancer_id, fingerprint); see the partial unique index in the migration.
 model Finding {
   id            String        @id @default(uuid(7)) @db.Uuid
-  seller_id     String        @db.Uuid
+  /// GlobalCart findings; null for GlobalGig ones (removed with the GlobalCart tables).
+  freelancer_id String?       @db.Uuid
   agent         AgentName
   type          String
   /// type:subject, e.g. refund_rate:de-DE. Stable across runs.
@@ -600,9 +237,705 @@ model Finding {
   last_seen_at  DateTime      @default(now()) @db.Timestamptz(3)
   created_at    DateTime      @default(now()) @db.Timestamptz(3)
 
-  seller Seller @relation(fields: [seller_id], references: [id])
+  freelancer Freelancer? @relation(fields: [freelancer_id], references: [id])
 
-  @@index([seller_id, status])
-  @@index([seller_id, fingerprint])
+  @@index([freelancer_id, status])
   @@map("findings")
+}
+
+// ===========================================================================
+// GlobalGig: freelancers sell services to clients in other countries.
+// Clients fund each milestone through PayPal into the platform account; the
+// money is "in holding" until the client accepts the delivery (or the worker
+// auto-releases it), and only then becomes available to the freelancer.
+// ===========================================================================
+
+enum Availability {
+  AVAILABLE
+  LIMITED
+  UNAVAILABLE
+}
+
+enum PricingModel {
+  PACKAGES
+  HOURLY
+}
+
+enum PackageTier {
+  BASIC
+  STANDARD
+  PREMIUM
+}
+
+enum PageStatus {
+  DRAFT
+  PUBLISHED
+  ARCHIVED
+}
+
+enum BriefStatus {
+  DRAFT
+  OPEN
+  CLOSED
+}
+
+/// REQUESTED: the client asked, the freelancer has not priced it yet.
+/// SENT: the freelancer sent a price. ACCEPTED: a contract was made from it.
+enum QuoteStatus {
+  REQUESTED
+  SENT
+  ACCEPTED
+  DECLINED
+  EXPIRED
+  WITHDRAWN
+}
+
+enum ContractSource {
+  PACKAGE
+  QUOTE
+}
+
+/// DRAFT: milestone plan proposed, nothing funded. ACTIVE: at least one
+/// milestone funded. COMPLETED: every milestone accepted or refunded.
+enum ContractStatus {
+  DRAFT
+  ACTIVE
+  COMPLETED
+  CANCELLED
+}
+
+/// See src/server/domain/milestones.ts for the transitions. Money is in
+/// holding in FUNDED, IN_PROGRESS, DELIVERED, REVISION_REQUESTED and DISPUTED,
+/// and released (available to the freelancer) only in ACCEPTED.
+enum MilestoneState {
+  AWAITING_FUNDING
+  FUNDED
+  IN_PROGRESS
+  DELIVERED
+  REVISION_REQUESTED
+  ACCEPTED
+  DISPUTED
+  REFUNDED
+  CANCELLED
+}
+
+/// How a milestone reached ACCEPTED.
+enum ReleaseKind {
+  CLIENT_ACCEPTED
+  AUTO_RELEASED
+  DISPUTE_RESOLVED
+}
+
+model Freelancer {
+  id                    String                       @id @default(uuid(7)) @db.Uuid
+  name                  String
+  email                 String                       @unique
+  /// PayPal account that receives payouts.
+  paypal_email          String
+  /// ISO 3166-1 alpha-2.
+  country               String                       @db.Char(2)
+  /// Home currency the freelancer is paid out in.
+  currency              String                       @db.Char(3)
+  /// UI and agent reply language, e.g. "en-US", "de-DE".
+  locale                String
+  headline              String                       @default("")
+  bio                   String                       @default("")
+  skills                String[]                     @default([])
+  /// Languages spoken, as BCP 47 language tags ("en", "de", "hi").
+  languages             String[]                     @default([])
+  /// IANA time zone, e.g. "Asia/Kolkata".
+  timezone              String
+  availability          Availability                 @default(AVAILABLE)
+  portfolio_links       String[]                     @default([])
+  /// No suggested rate goes below this, in `currency` minor units per hour.
+  hourly_floor_minor    Int
+  /// Short code in invoice numbers, e.g. "PRK" -> GG-PRK-000042.
+  invoice_prefix        String                       @unique
+  /// Last invoice number issued; incremented under a row lock.
+  invoice_seq           Int                          @default(0)
+  /// Opt-in: the Treasury agent may draft payout proposals by itself (still approved by the freelancer).
+  auto_payout_proposals Boolean                      @default(false)
+  /// Skills + headline embedding for client search.
+  embedding             Unsupported("vector(1024)")?
+  embedded_at           DateTime?                    @db.Timestamptz(3)
+  created_at            DateTime                     @default(now()) @db.Timestamptz(3)
+
+  services         Service[]
+  service_pages    ServicePage[]
+  market_research  MarketRateResearch[]
+  quotes           Quote[]
+  contracts        Contract[]
+  milestones       Milestone[]
+  payments         MilestonePayment[]
+  refunds          MilestoneRefund[]
+  invoices         Invoice[]
+  threads          Thread[]
+  payout_schedules FreelancerPayoutSchedule[]
+  payouts          FreelancerPayout[]
+  agent_sessions   AgentSession[]
+  agent_actions    AgentAction[]
+  findings         Finding[]
+
+  @@map("freelancers")
+}
+
+model Client {
+  id           String   @id @default(uuid(7)) @db.Uuid
+  name         String
+  email        String   @unique
+  /// Default market; the session can override it from the market picker.
+  locale       String
+  country      String   @db.Char(2)
+  /// Set when the client hires as a company.
+  company_name String?
+  /// VAT / tax ID exactly as the client typed it. Printed on invoices, never validated or used in any calculation.
+  tax_id       String?
+  created_at   DateTime @default(now()) @db.Timestamptz(3)
+
+  briefs         Brief[]
+  quotes         Quote[]
+  contracts      Contract[]
+  milestones     Milestone[]
+  payments       MilestonePayment[]
+  invoices       Invoice[]
+  threads        Thread[]
+  agent_sessions AgentSession[]
+
+  @@map("clients")
+}
+
+// ---------------------------------------------------------------------------
+// Services and localized service pages
+// ---------------------------------------------------------------------------
+
+model Service {
+  id                String       @id @default(uuid(7)) @db.Uuid
+  freelancer_id     String       @db.Uuid
+  /// Freelancer's own short code, unique per freelancer.
+  code              String
+  /// Source-language title and description, written by the freelancer.
+  title             String
+  description       String
+  source_locale     String
+  category          String
+  tags              String[]     @default([])
+  pricing_model     PricingModel
+  /// Base prices (packages and hourly rate) are in this currency, the freelancer's home currency.
+  currency          String       @db.Char(3)
+  /// HOURLY services only.
+  hourly_rate_minor Int?
+  image_url         String?
+  rating_avg        Float?
+  rating_count      Int          @default(0)
+  created_at        DateTime     @default(now()) @db.Timestamptz(3)
+  updated_at        DateTime     @updatedAt @db.Timestamptz(3)
+
+  freelancer      Freelancer           @relation(fields: [freelancer_id], references: [id])
+  packages        ServicePackage[]
+  pages           ServicePage[]
+  market_research MarketRateResearch[]
+  quotes          Quote[]
+  contracts       Contract[]
+  threads         Thread[]
+
+  @@unique([freelancer_id, code])
+  @@index([freelancer_id])
+  @@map("services")
+}
+
+/// Basic / Standard / Premium: scope, delivery time and revisions for a fixed price.
+model ServicePackage {
+  id               String      @id @default(uuid(7)) @db.Uuid
+  service_id       String      @db.Uuid
+  tier             PackageTier
+  name             String
+  scope            String
+  deliverables     String[]    @default([])
+  delivery_days    Int
+  revisions        Int
+  /// The freelancer's own estimate; the rate floor is estimated_hours x hourly floor.
+  estimated_hours  Int
+  /// In the service currency.
+  base_price_minor Int
+
+  service   Service            @relation(fields: [service_id], references: [id], onDelete: Cascade)
+  prices    ServicePagePrice[]
+  quotes    Quote[]
+  contracts Contract[]
+
+  @@unique([service_id, tier])
+  @@map("service_packages")
+}
+
+/// One service page per market: localized copy and prices in the market currency.
+model ServicePage {
+  id                String                       @id @default(uuid(7)) @db.Uuid
+  service_id        String                       @db.Uuid
+  freelancer_id     String                       @db.Uuid
+  locale            String
+  currency          String                       @db.Char(3)
+  title             String
+  description       String
+  seo_title         String
+  /// HOURLY services: the rate in this market.
+  hourly_rate_minor Int?
+  status            PageStatus                   @default(DRAFT)
+  /// The suggest_rate result the prices came from (null if set by hand).
+  pricing           Json?
+  embedding         Unsupported("vector(1024)")?
+  embedded_at       DateTime?                    @db.Timestamptz(3)
+  published_at      DateTime?                    @db.Timestamptz(3)
+  created_at        DateTime                     @default(now()) @db.Timestamptz(3)
+  updated_at        DateTime                     @updatedAt @db.Timestamptz(3)
+
+  service     Service                @relation(fields: [service_id], references: [id], onDelete: Cascade)
+  freelancer  Freelancer             @relation(fields: [freelancer_id], references: [id])
+  prices      ServicePagePrice[]
+  daily_stats ServicePageDailyStat[]
+
+  @@unique([service_id, locale])
+  @@index([locale, status])
+  @@index([freelancer_id])
+  @@map("service_pages")
+}
+
+/// A package's price on one service page, in the page currency.
+model ServicePagePrice {
+  page_id     String @db.Uuid
+  package_id  String @db.Uuid
+  price_minor Int
+
+  page    ServicePage    @relation(fields: [page_id], references: [id], onDelete: Cascade)
+  package ServicePackage @relation(fields: [package_id], references: [id], onDelete: Cascade)
+
+  @@id([page_id, package_id])
+  @@map("service_page_prices")
+}
+
+/// What comparable freelance services cost in one market (freelance platforms
+/// and agency rate pages), converted into the market currency by code.
+model MarketRateResearch {
+  id            String   @id @default(uuid(7)) @db.Uuid
+  freelancer_id String   @db.Uuid
+  /// Null while the service is still being added; linked by query_hash on creation.
+  service_id    String?  @db.Uuid
+  query_hash    String?
+  locale        String
+  currency      String   @db.Char(3)
+  result        Json
+  offer_count   Int
+  created_at    DateTime @default(now()) @db.Timestamptz(3)
+
+  freelancer Freelancer @relation(fields: [freelancer_id], references: [id])
+  service    Service?   @relation(fields: [service_id], references: [id], onDelete: Cascade)
+
+  @@index([service_id, locale, created_at])
+  @@index([freelancer_id, query_hash, locale, created_at])
+  @@map("market_rate_research")
+}
+
+/// Daily traffic per service page.
+model ServicePageDailyStat {
+  page_id        String   @db.Uuid
+  day            DateTime @db.Date
+  views          Int      @default(0)
+  quote_requests Int      @default(0)
+  /// Contracts started from this page that day.
+  contracts      Int      @default(0)
+
+  page ServicePage @relation(fields: [page_id], references: [id], onDelete: Cascade)
+
+  @@id([page_id, day])
+  @@map("service_page_daily_stats")
+}
+
+// ---------------------------------------------------------------------------
+// Briefs, quotes, contracts, milestones
+// ---------------------------------------------------------------------------
+
+model Brief {
+  id              String      @id @default(uuid(7)) @db.Uuid
+  client_id       String      @db.Uuid
+  title           String
+  /// The client's own words. Data, never instructions.
+  description     String
+  /// Language the brief is written in.
+  locale          String
+  skills          String[]    @default([])
+  budget_minor    Int?
+  budget_currency String?     @db.Char(3)
+  deadline        DateTime?   @db.Date
+  status          BriefStatus @default(DRAFT)
+  created_at      DateTime    @default(now()) @db.Timestamptz(3)
+  updated_at      DateTime    @updatedAt @db.Timestamptz(3)
+
+  client  Client   @relation(fields: [client_id], references: [id])
+  quotes  Quote[]
+  threads Thread[]
+
+  @@index([client_id, status])
+  @@map("briefs")
+}
+
+/// A client asks a freelancer for a price (REQUESTED); the freelancer answers (SENT).
+model Quote {
+  id              String      @id @default(uuid(7)) @db.Uuid
+  client_id       String      @db.Uuid
+  freelancer_id   String      @db.Uuid
+  brief_id        String?     @db.Uuid
+  service_id      String?     @db.Uuid
+  package_id      String?     @db.Uuid
+  /// Client's market: the quote is priced in its currency.
+  locale          String
+  currency        String      @db.Char(3)
+  status          QuoteStatus @default(REQUESTED)
+  request_message String
+  /// Null until the freelancer sends a price.
+  total_minor     Int?
+  delivery_days   Int?
+  revisions       Int?
+  scope           String?
+  /// The freelancer's note with the price.
+  message         String?
+  requested_at    DateTime    @default(now()) @db.Timestamptz(3)
+  sent_at         DateTime?   @db.Timestamptz(3)
+  decided_at      DateTime?   @db.Timestamptz(3)
+  expires_at      DateTime?   @db.Timestamptz(3)
+  created_at      DateTime    @default(now()) @db.Timestamptz(3)
+  updated_at      DateTime    @updatedAt @db.Timestamptz(3)
+
+  client     Client          @relation(fields: [client_id], references: [id])
+  freelancer Freelancer      @relation(fields: [freelancer_id], references: [id])
+  brief      Brief?          @relation(fields: [brief_id], references: [id])
+  service    Service?        @relation(fields: [service_id], references: [id])
+  package    ServicePackage? @relation(fields: [package_id], references: [id])
+  contract   Contract?
+  threads    Thread[]
+
+  @@index([freelancer_id, status])
+  @@index([client_id, status])
+  @@map("quotes")
+}
+
+/// One client, one freelancer, one currency. Milestones add up to total_minor.
+model Contract {
+  id                String         @id @default(uuid(7)) @db.Uuid
+  client_id         String         @db.Uuid
+  freelancer_id     String         @db.Uuid
+  source            ContractSource
+  service_id        String?        @db.Uuid
+  package_id        String?        @db.Uuid
+  quote_id          String?        @unique @db.Uuid
+  title             String
+  scope             String
+  /// Client's market, e.g. "de-DE".
+  locale            String
+  currency          String         @db.Char(3)
+  total_minor       Int
+  revisions_allowed Int
+  status            ContractStatus @default(DRAFT)
+  activated_at      DateTime?      @db.Timestamptz(3)
+  completed_at      DateTime?      @db.Timestamptz(3)
+  created_at        DateTime       @default(now()) @db.Timestamptz(3)
+  updated_at        DateTime       @updatedAt @db.Timestamptz(3)
+
+  client     Client             @relation(fields: [client_id], references: [id])
+  freelancer Freelancer         @relation(fields: [freelancer_id], references: [id])
+  service    Service?           @relation(fields: [service_id], references: [id])
+  package    ServicePackage?    @relation(fields: [package_id], references: [id])
+  quote      Quote?             @relation(fields: [quote_id], references: [id])
+  milestones Milestone[]
+  payments   MilestonePayment[]
+  refunds    MilestoneRefund[]
+  invoices   Invoice[]
+  threads    Thread[]
+
+  @@index([client_id, status])
+  @@index([freelancer_id, status])
+  @@map("contracts")
+}
+
+model Milestone {
+  id              String         @id @default(uuid(7)) @db.Uuid
+  contract_id     String         @db.Uuid
+  /// Denormalised from the contract so owner filters and ledger sums need no join.
+  freelancer_id   String         @db.Uuid
+  client_id       String         @db.Uuid
+  /// 1-based order within the contract.
+  position        Int
+  title           String
+  description     String         @default("")
+  currency        String         @db.Char(3)
+  amount_minor    Int
+  due_date        DateTime?      @db.Date
+  state           MilestoneState @default(AWAITING_FUNDING)
+  revision_count  Int            @default(0)
+  funded_at       DateTime?      @db.Timestamptz(3)
+  started_at      DateTime?      @db.Timestamptz(3)
+  delivered_at    DateTime?      @db.Timestamptz(3)
+  /// delivered_at + AUTO_RELEASE_DAYS; cleared when the client responds.
+  auto_release_at DateTime?      @db.Timestamptz(3)
+  released_at     DateTime?      @db.Timestamptz(3)
+  release_kind    ReleaseKind?
+  disputed_at     DateTime?      @db.Timestamptz(3)
+  dispute_reason  String?
+  created_at      DateTime       @default(now()) @db.Timestamptz(3)
+  updated_at      DateTime       @updatedAt @db.Timestamptz(3)
+
+  contract    Contract           @relation(fields: [contract_id], references: [id], onDelete: Cascade)
+  freelancer  Freelancer         @relation(fields: [freelancer_id], references: [id])
+  client      Client             @relation(fields: [client_id], references: [id])
+  payments    MilestonePayment[]
+  refunds     MilestoneRefund[]
+  events      MilestoneEvent[]
+  invoice     Invoice?
+  attachments Attachment[]
+
+  @@unique([contract_id, position])
+  @@index([freelancer_id, state])
+  @@index([client_id, state])
+  @@index([state, auto_release_at])
+  @@map("milestones")
+}
+
+/// Every milestone state change, with who made it.
+model MilestoneEvent {
+  id           String         @id @default(uuid(7)) @db.Uuid
+  milestone_id String         @db.Uuid
+  event        String
+  from_state   MilestoneState
+  to_state     MilestoneState
+  actor        ActorType
+  actor_id     String?        @db.Uuid
+  note         String?
+  created_at   DateTime       @default(now()) @db.Timestamptz(3)
+
+  milestone Milestone @relation(fields: [milestone_id], references: [id], onDelete: Cascade)
+
+  @@index([milestone_id, created_at])
+  @@map("milestone_events")
+}
+
+// ---------------------------------------------------------------------------
+// Milestone money
+// ---------------------------------------------------------------------------
+
+/// One row per PayPal order attempt for a milestone. Fees are measured at
+/// capture; net_to_freelancer is recorded when the milestone is released.
+model MilestonePayment {
+  id                      String        @id @default(uuid(7)) @db.Uuid
+  milestone_id            String        @db.Uuid
+  contract_id             String        @db.Uuid
+  freelancer_id           String        @db.Uuid
+  client_id               String        @db.Uuid
+  paypal_order_id         String        @unique
+  approve_url             String?
+  /// `${milestoneId}-${uuid}`: PayPal invoice_id and PayPal-Request-Id.
+  paypal_invoice_id       String        @unique
+  status                  PaymentStatus @default(CREATED)
+  currency                String        @db.Char(3)
+  gross_minor             Int
+  paypal_fee_minor        Int?
+  fee_is_estimate         Boolean       @default(false)
+  platform_fee_minor      Int?
+  fx_cost_minor           Int?
+  /// Set on release: gross - PayPal fee - platform fee - FX cost (less anything refunded before release).
+  net_to_freelancer_minor Int?
+  capture_id              String?       @unique
+  failure_reason          String?
+  captured_at             DateTime?     @db.Timestamptz(3)
+  released_at             DateTime?     @db.Timestamptz(3)
+  created_at              DateTime      @default(now()) @db.Timestamptz(3)
+  updated_at              DateTime      @updatedAt @db.Timestamptz(3)
+
+  milestone  Milestone         @relation(fields: [milestone_id], references: [id])
+  contract   Contract          @relation(fields: [contract_id], references: [id])
+  freelancer Freelancer        @relation(fields: [freelancer_id], references: [id])
+  client     Client            @relation(fields: [client_id], references: [id])
+  refunds    MilestoneRefund[]
+
+  @@index([milestone_id])
+  @@index([freelancer_id, status])
+  @@index([status])
+  @@map("milestone_payments")
+}
+
+model MilestoneRefund {
+  id                          String       @id @default(uuid(7)) @db.Uuid
+  payment_id                  String       @db.Uuid
+  milestone_id                String       @db.Uuid
+  contract_id                 String       @db.Uuid
+  freelancer_id               String       @db.Uuid
+  currency                    String       @db.Char(3)
+  amount_minor                Int
+  reason                      String
+  /// True when the milestone was not yet released: the refund comes out of holding, not the freelancer's balance.
+  from_holding                Boolean
+  status                      RefundStatus @default(PROPOSED)
+  paypal_refund_id            String?      @unique
+  paypal_fee_returned_minor   Int?
+  platform_fee_returned_minor Int?
+  /// Debited from the freelancer's released balance (0 for a refund from holding).
+  freelancer_debit_minor      Int?
+  error                       String?
+  created_at                  DateTime     @default(now()) @db.Timestamptz(3)
+  completed_at                DateTime?    @db.Timestamptz(3)
+
+  payment       MilestonePayment @relation(fields: [payment_id], references: [id])
+  milestone     Milestone        @relation(fields: [milestone_id], references: [id])
+  contract      Contract         @relation(fields: [contract_id], references: [id])
+  freelancer    Freelancer       @relation(fields: [freelancer_id], references: [id])
+  agent_actions AgentAction[]
+
+  @@index([freelancer_id, status])
+  @@index([payment_id])
+  @@map("milestone_refunds")
+}
+
+/// One invoice per released milestone, in the client's currency and language.
+/// Amounts and the client's tax ID as entered; no tax is calculated.
+model Invoice {
+  id                 String   @id @default(uuid(7)) @db.Uuid
+  freelancer_id      String   @db.Uuid
+  client_id          String   @db.Uuid
+  contract_id        String   @db.Uuid
+  milestone_id       String   @unique @db.Uuid
+  /// Sequential per freelancer, gap-free.
+  seq                Int
+  number             String
+  locale             String
+  currency           String   @db.Char(3)
+  /// Line items as computed by src/server/domain/invoices.ts.
+  lines              Json
+  total_minor        Int
+  /// Snapshots, so a later profile edit does not change an issued invoice.
+  freelancer_name    String
+  freelancer_country String   @db.Char(2)
+  client_name        String
+  client_company     String?
+  client_tax_id      String?
+  issued_at          DateTime @default(now()) @db.Timestamptz(3)
+
+  freelancer Freelancer @relation(fields: [freelancer_id], references: [id])
+  client     Client     @relation(fields: [client_id], references: [id])
+  contract   Contract   @relation(fields: [contract_id], references: [id])
+  milestone  Milestone  @relation(fields: [milestone_id], references: [id])
+
+  @@unique([freelancer_id, seq])
+  @@index([client_id, issued_at])
+  @@map("invoices")
+}
+
+model FreelancerPayoutSchedule {
+  id            String               @id @default(uuid(7)) @db.Uuid
+  freelancer_id String               @db.Uuid
+  currency      String               @db.Char(3)
+  status        PayoutScheduleStatus @default(PROPOSED)
+  created_at    DateTime             @default(now()) @db.Timestamptz(3)
+
+  freelancer    Freelancer         @relation(fields: [freelancer_id], references: [id])
+  payouts       FreelancerPayout[]
+  agent_actions AgentAction[]
+
+  @@index([freelancer_id])
+  @@map("freelancer_payout_schedules")
+}
+
+model FreelancerPayout {
+  id              String       @id @default(uuid(7)) @db.Uuid
+  schedule_id     String       @db.Uuid
+  freelancer_id   String       @db.Uuid
+  currency        String       @db.Char(3)
+  amount_minor    Int
+  fee_minor       Int
+  fee_is_estimate Boolean      @default(true)
+  receiver_email  String
+  scheduled_for   DateTime     @db.Timestamptz(3)
+  status          PayoutStatus @default(PROPOSED)
+  sender_batch_id String       @unique
+  paypal_batch_id String?      @unique
+  error           String?
+  completed_at    DateTime?    @db.Timestamptz(3)
+  created_at      DateTime     @default(now()) @db.Timestamptz(3)
+  updated_at      DateTime     @updatedAt @db.Timestamptz(3)
+
+  schedule   FreelancerPayoutSchedule @relation(fields: [schedule_id], references: [id])
+  freelancer Freelancer               @relation(fields: [freelancer_id], references: [id])
+
+  @@index([freelancer_id, status])
+  @@map("freelancer_payouts")
+}
+
+// ---------------------------------------------------------------------------
+// Project workspace threads
+// ---------------------------------------------------------------------------
+
+model Thread {
+  id                String             @id @default(uuid(7)) @db.Uuid
+  freelancer_id     String             @db.Uuid
+  client_id         String             @db.Uuid
+  service_id        String?            @db.Uuid
+  brief_id          String?            @db.Uuid
+  quote_id          String?            @db.Uuid
+  contract_id       String?            @db.Uuid
+  subject           String
+  status            ConversationStatus @default(OPEN)
+  last_message_at   DateTime           @default(now()) @db.Timestamptz(3)
+  freelancer_unread Int                @default(0)
+  client_unread     Int                @default(0)
+  created_at        DateTime           @default(now()) @db.Timestamptz(3)
+  updated_at        DateTime           @updatedAt @db.Timestamptz(3)
+
+  freelancer  Freelancer      @relation(fields: [freelancer_id], references: [id])
+  client      Client          @relation(fields: [client_id], references: [id])
+  service     Service?        @relation(fields: [service_id], references: [id])
+  brief       Brief?          @relation(fields: [brief_id], references: [id])
+  quote       Quote?          @relation(fields: [quote_id], references: [id])
+  contract    Contract?       @relation(fields: [contract_id], references: [id])
+  messages    ThreadMessage[]
+  attachments Attachment[]
+
+  @@index([freelancer_id, last_message_at])
+  @@index([client_id, last_message_at])
+  @@map("threads")
+}
+
+model ThreadMessage {
+  id          String    @id @default(uuid(7)) @db.Uuid
+  thread_id   String    @db.Uuid
+  /// FREELANCER or CLIENT.
+  sender      ActorType
+  body        String
+  body_locale String
+  /// Rendering in the other party's language, when they differ.
+  translation String?
+  created_at  DateTime  @default(now()) @db.Timestamptz(3)
+
+  thread      Thread       @relation(fields: [thread_id], references: [id], onDelete: Cascade)
+  attachments Attachment[]
+
+  @@index([thread_id, created_at])
+  @@map("thread_messages")
+}
+
+/// A file shared in a thread, optionally as a milestone deliverable. The file
+/// itself lives in storage (local disk in dev) under storage_key.
+model Attachment {
+  id           String    @id @default(uuid(7)) @db.Uuid
+  thread_id    String    @db.Uuid
+  message_id   String?   @db.Uuid
+  milestone_id String?   @db.Uuid
+  uploaded_by  ActorType
+  file_name    String
+  content_type String
+  size_bytes   Int
+  storage_key  String    @unique
+  created_at   DateTime  @default(now()) @db.Timestamptz(3)
+
+  thread    Thread         @relation(fields: [thread_id], references: [id], onDelete: Cascade)
+  message   ThreadMessage? @relation(fields: [message_id], references: [id], onDelete: SetNull)
+  milestone Milestone?     @relation(fields: [milestone_id], references: [id], onDelete: SetNull)
+
+  @@index([milestone_id])
+  @@map("attachments")
 }

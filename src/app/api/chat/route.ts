@@ -1,14 +1,14 @@
 import { z } from "zod";
 import { sendMessage } from "@/server/agents/orchestrator";
 import { MAX_USER_MESSAGE_CHARS } from "@/server/agents/runtime";
-import { requirePrincipal } from "@/server/auth";
+import { requireChatOwner } from "@/server/auth";
 import { checkOrigin, errorBody, json, readBody } from "@/server/http";
 
 const bodySchema = z.object({
   text: z.string().min(1).max(MAX_USER_MESSAGE_CHARS),
   session_id: z.uuid().nullish(),
-  agent: z.enum(["LISTING", "TREASURY", "OPERATIONS"]).nullish(),
-  product_id: z.uuid().nullish(),
+  agent: z.enum(["PROFILE", "TREASURY", "PROJECTS"]).nullish(),
+  service_id: z.uuid().nullish(),
 });
 
 /**
@@ -19,17 +19,16 @@ const bodySchema = z.object({
  * Identity and market come from the signed session cookie only.
  */
 export async function POST(req: Request): Promise<Response> {
-  let principal;
+  let principal, owner;
   let body;
   try {
     checkOrigin(req);
-    principal = await requirePrincipal(req);
+    ({ principal, owner } = await requireChatOwner(req));
     body = await readBody(req, bodySchema);
   } catch (err) {
     const { status, body: b } = errorBody(err);
     return json(b, status);
   }
-  const owner = principal.role === "SELLER" ? { type: "SELLER" as const, sellerId: principal.sellerId } : { type: "BUYER" as const, buyerId: principal.buyerId };
   const encoder = new TextEncoder();
 
   const stream = new ReadableStream<Uint8Array>({
@@ -48,9 +47,9 @@ export async function POST(req: Request): Promise<Response> {
           owner,
           text: body.text,
           sessionId: body.session_id,
-          agent: principal.role === "SELLER" ? body.agent : null,
-          marketLocale: principal.role === "BUYER" ? principal.market : null,
-          productId: principal.role === "SELLER" ? body.product_id : null,
+          agent: principal.role === "FREELANCER" ? body.agent : null,
+          marketLocale: principal.role === "CLIENT" ? principal.market : null,
+          serviceId: principal.role === "FREELANCER" ? body.service_id : null,
           onEvent: (e) => send(e.type, e),
         });
         send("result", result);

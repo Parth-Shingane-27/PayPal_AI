@@ -1,7 +1,7 @@
 @import "tailwindcss";
 
 /*
- * GlobalCart visual system: "lacquer and gold leaf".
+ * GlobalGig visual system: "lacquer and gold leaf".
  * Warm ivory paper, lacquer-black ink, gold leaf for actions and for money
  * that reaches the maker, bronze for highlights and estimates, and a plum
  * glaze for fees, refunds and unread items. No greens, no reds as accent.
@@ -31,7 +31,7 @@
   --positive-ink: #5e440a;
   --focus: #7d5d10;
   /* AI assistant: indigo, the complement of gold leaf, so the launcher stands
-     out against the warm page and product art. Used for the assistant only. */
+     out against the warm page and service art. Used for the assistant only. */
   --assist: #3b3fd8;
   --assist-on: #ffffff;
   --assist-soft: #e3e4ff;
@@ -326,8 +326,8 @@ select:not(.ag-root-wrapper select):hover {
  * layouts that used to switch columns on the screen width must switch on the
  * width of the content area instead. Each threshold equals the content width the
  * old screen breakpoint gave, so with the panel closed nothing changes.
- *   cq-*  seller pages: screen width minus the 15rem sidebar and 2rem padding on each side.
- *   bq-*  buyer pages: screen width minus 1.5rem padding on each side.
+ *   cq-*  freelancer pages: screen width minus the 15rem sidebar and 2rem padding on each side.
+ *   bq-*  client pages: screen width minus 1.5rem padding on each side.
  * (The content wrapper is the @container; see components/shell/Shell.tsx.)
  */
 @custom-variant cq-sm {
@@ -368,5 +368,61 @@ select:not(.ag-root-wrapper select):hover {
 @custom-variant bq-xl {
   @container (min-width: 1232px) {
     @slot;
+  }
+}
+
+/*
+ * ---- GlobalGig invoice printing (components/gig/InvoiceDocument.tsx) ----
+ * On a page that shows an invoice (.gig-invoice), print only that sheet, on A4,
+ * in light colours whatever the theme. Every element that neither is nor
+ * contains the invoice is hidden; the invoice's ancestors lose their layout
+ * (sidebar grid, padding, scroll areas) so the sheet starts at the top of the page.
+ */
+@media print {
+  @page {
+    size: A4;
+    margin: 16mm 14mm;
+  }
+  body:has(.gig-invoice) {
+    background: #fff !important;
+  }
+  body:has(.gig-invoice) :not(:has(.gig-invoice)):not(.gig-invoice):not(.gig-invoice *) {
+    display: none !important;
+  }
+  body:has(.gig-invoice) :has(.gig-invoice) {
+    display: block !important;
+    position: static !important;
+    width: auto !important;
+    max-width: none !important;
+    height: auto !important;
+    min-height: 0 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    border: 0 !important;
+    overflow: visible !important;
+    background: #fff !important;
+    box-shadow: none !important;
+  }
+  .gig-invoice {
+    --ink: #111;
+    --ink-2: #333;
+    --ink-3: #555;
+    --sheet: #fff;
+    --sheet-2: #f2f2f2;
+    --paper: #fff;
+    --rule: #d0d0d0;
+    --rule-strong: #888;
+    max-width: none !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    border: 0 !important;
+    border-radius: 0 !important;
+    color: #111 !important;
+    background: #fff !important;
+    print-color-adjust: exact;
+    -webkit-print-color-adjust: exact;
+  }
+  .gig-invoice tr {
+    break-inside: avoid;
   }
 }

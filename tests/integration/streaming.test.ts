@@ -5,7 +5,7 @@ import { createSession, historyOf } from "@/server/agents/sessions";
 import { TREASURY_TOOLS } from "@/server/agents/treasury/tools";
 import { prisma } from "@/server/db";
 import { getMarket } from "@/server/domain/markets";
-import { makeSeller, resetDb } from "../helpers/db";
+import { makeFreelancer, resetDb } from "../helpers/db";
 import { call, reply, text } from "../helpers/fake-model";
 
 beforeEach(resetDb);
@@ -31,8 +31,8 @@ function streamingModel(steps: Step[]) {
 }
 
 async function run(model: ModelApi, onEvent?: (e: RunEvent) => void) {
-  const seller = await makeSeller();
-  const owner = { type: "SELLER" as const, sellerId: seller.id };
+  const freelancer = await makeFreelancer();
+  const owner = { type: "FREELANCER" as const, freelancerId: freelancer.id };
   const session = await createSession(owner, "TREASURY", "en-US");
   const result = await runAgent({
     sessionId: session.id,

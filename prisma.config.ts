@@ -9,6 +9,13 @@ export default defineConfig({
   },
   datasource: {
     // `DB_TARGET=test` points migrate commands at the integration-test database.
-    url: process.env.DB_TARGET === "test" ? env("TEST_DATABASE_URL") : env("DATABASE_URL"),
+    // Migrations need a direct (non-pooled) connection on Neon, so prefer
+    // DATABASE_URL_UNPOOLED and fall back to DATABASE_URL (e.g. local Docker).
+    url:
+      process.env.DB_TARGET === "test"
+        ? env("TEST_DATABASE_URL")
+        : process.env.DATABASE_URL_UNPOOLED
+          ? env("DATABASE_URL_UNPOOLED")
+          : env("DATABASE_URL"),
   },
 });

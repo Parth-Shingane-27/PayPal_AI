@@ -7,7 +7,7 @@ import { paypal } from "@/server/services/audit";
 import { storeWebhookEvent } from "@/server/services/webhooks";
 import { payoutProcessor, reconcilePayouts, startWorkers, webhookProcessor } from "../../worker/jobs";
 import { buildServer } from "../../worker/server";
-import { makeBuyer, makeListing, makePaidOrder, makeProduct, makeSeller, resetDb } from "../helpers/db";
+import { makeClient, makeContract, makeFreelancer, resetDb } from "../helpers/db";
 
 const queues: Queue[] = [];
 function queue(name: string) {
@@ -91,13 +91,12 @@ describe("jobs", () => {
   });
 
   async function scheduledPayout() {
-    const seller = await makeSeller();
-    const buyer = await makeBuyer();
-    const l = await makeListing(seller.id, (await makeProduct(seller.id)).id, { price_minor: 10000 });
-    await makePaidOrder(seller.id, buyer.id, l, { paypalFee: 400, platformFee: 500 });
-    const schedule = await prisma.payoutSchedule.create({ data: { seller_id: seller.id, currency: "USD", status: "APPROVED" } });
-    return prisma.payout.create({
-      data: { schedule_id: schedule.id, seller_id: seller.id, currency: "USD", amount_minor: 5000, fee_minor: 100, receiver_email: "s@x.test", scheduled_for: new Date(), status: "SCHEDULED", sender_batch_id: `gc-payout-${randomUUID()}` },
+    const f = await makeFreelancer({ currency: "USD" });
+    const c = await makeClient();
+    await makeContract(f.id, c.id, [{ amount_minor: 10_000, state: "ACCEPTED" }], { currency: "USD" });
+    const schedule = await prisma.freelancerPayoutSchedule.create({ data: { freelancer_id: f.id, currency: "USD", status: "APPROVED" } });
+    return prisma.freelancerPayout.create({
+      data: { schedule_id: schedule.id, freelancer_id: f.id, currency: "USD", amount_minor: 5000, fee_minor: 100, receiver_email: "f@x.test", scheduled_for: new Date(), status: "SCHEDULED", sender_batch_id: `gg-payout-${randomUUID()}` },
     });
   }
 
@@ -112,7 +111,7 @@ describe("jobs", () => {
     expect(moveToDelayed).toHaveBeenCalledWith(expect.any(Number), "tok");
     expect(create.mock.calls[0]![1]).toMatchObject({ senderBatchId: payout.sender_batch_id });
     expect(await payoutProcessor(job, "tok")).toBe("DONE");
-    expect(await prisma.payout.findUniqueOrThrow({ where: { id: payout.id } })).toMatchObject({ status: "SUCCESS", fee_minor: 30, paypal_batch_id: "B-1" });
+    expect(await prisma.freelancerPayout.findUniqueOrThrow({ where: { id: payout.id } })).toMatchObject({ status: "SUCCESS", fee_minor: 30, paypal_batch_id: "B-1" });
   });
 
   it("reconciles a SCHEDULED payout that has no job", async () => {
@@ -133,7 +132,7 @@ describe("jobs", () => {
     let status = "SCHEDULED";
     while (Date.now() < deadline && status !== "SUCCESS") {
       await new Promise((r) => setTimeout(r, 100));
-      status = (await prisma.payout.findUniqueOrThrow({ where: { id: payout.id } })).status;
+      status = (await prisma.freelancerPayout.findUniqueOrThrow({ where: { id: payout.id } })).status;
     }
     await stop();
     expect(status).toBe("SUCCESS");

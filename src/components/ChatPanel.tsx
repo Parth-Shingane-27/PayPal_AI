@@ -10,9 +10,9 @@ import { Markdown } from "./Markdown";
 import { api, type Money } from "./api";
 import { useI18n } from "./i18n/I18nProvider";
 import { IconCheck } from "./icons";
-import { type CaptureOutcome, PayPalButtons } from "./PayPalButtons";
+import { PayPalButtons } from "./PayPalButtons";
 
-type AgentName = "LISTING" | "SHOPPING" | "TREASURY" | "OPERATIONS";
+type AgentName = "PROFILE" | "HIRING" | "TREASURY" | "PROJECTS";
 type ToolCall = { id: string; name: string; ok: boolean; output?: unknown; error?: string; durationMs: number };
 type Turn = {
   agent: AgentName;
@@ -20,12 +20,12 @@ type Turn = {
   outcome: string;
   toolCalls: ToolCall[];
   pendingApprovals: { approval_id: string; message?: string; amount?: Money; total_including_fees?: Money }[];
-  checkoutLinks: { order_id: string; paypal_order_id: string; approve_url: string; total: Money }[];
+  /** A milestone the client can fund in PayPal. */
+  checkoutLinks: { contract_id: string; milestone_id: string; paypal_order_id: string; approve_url: string; amount: Money }[];
   usage: { input_tokens: number; cached_input_tokens: number; output_tokens: number; thinking_tokens: number; modelCalls: number };
 };
 type ChatResult = { sessionId: string; agent: AgentName; routed: { agent: AgentName; reason: string } | null; turns: Turn[]; handoff: { from: AgentName; to: AgentName } | null };
 type Step = { id: string; name: string; state: "running" | "ok" | "error" };
-type Product = { listing_id: string; title: string; summary?: string; description?: string; price: Money; seller: string | { name: string } };
 
 type Entry =
   | { kind: "user"; text: string }
@@ -34,43 +34,17 @@ type Entry =
 
 /** Tools that have a plain-words progress label (chat.step.<tool>); anything else shows a generic one. */
 const STEP_TOOLS = [
-  "get_product",
-  "preview_product",
-  "create_product",
   "list_markets",
   "get_fx_rate",
-  "suggest_price",
-  "save_listing_draft",
-  "search_products",
-  "compare_products",
-  "add_to_cart",
-  "update_cart",
-  "view_cart",
-  "create_paypal_order",
   "get_balances",
   "estimate_fees",
   "forecast_earnings",
-  "compare_selling_direct",
   "propose_payout_schedule",
-  "query_orders",
-  "get_order_details",
-  "get_payment_status",
   "earnings_by_market",
   "detect_anomalies",
   "propose_refund",
   "handoff",
 ];
-
-function productsOf(turn: Turn): Product[] {
-  const out: Product[] = [];
-  for (const c of turn.toolCalls) {
-    if (!c.ok || !c.output) continue;
-    const o = c.output as { results?: Product[]; listings?: Product[] };
-    if (c.name === "search_products" && o.results) out.push(...o.results);
-    if (c.name === "compare_products" && o.listings) out.push(...o.listings);
-  }
-  return [...new Map(out.map((p) => [p.listing_id, p])).values()];
-}
 
 /** localStorage can be unavailable (private mode, blocked storage); the chat then just starts fresh. */
 function readStored(key: string): string | null {
@@ -117,17 +91,17 @@ const field =
  * The conversation inside the assistant panel: history, messages (rendered
  * markdown, streamed as they are written), progress while tools run, and the
  * composer. It has no title or frame of its own; the panel provides those.
- * Which agent it talks to, and which product or market it is scoped to, come
+ * Which agent it talks to, and which service or market it is scoped to, come
  * from the panel.
  */
 export function ChatPanel(props: {
   agent: DockAgent;
-  productId?: string;
-  /** Extra scope for remembering the open conversation (the "new product" chat, a buyer's market). */
+  subjectId?: string;
+  /** Extra scope for remembering the open conversation (the "new service" chat, a client's market). */
   resumeKey?: string;
-  /** Buyer chats: PayPal client id for checkout buttons. */
+  /** Client chats: PayPal client id for checkout buttons. */
   paypalClientId?: string | null;
-  /** Called after each completed reply (e.g. to refresh listings). */
+  /** Called after each completed reply (e.g. to refresh service pages). */
   onResult?: () => void;
   /** Reports whether a reply is being written, so the panel can hold off switching agent. */
   onBusyChange?: (busy: boolean) => void;
@@ -135,9 +109,9 @@ export function ChatPanel(props: {
   const { t } = useI18n();
   const base = useBase();
   const { agent, onResult, onBusyChange } = props;
-  const isBuyer = agent === "SHOPPING";
-  // The seller's routing assistant sends no agent; buyers never choose one.
-  const apiAgent = agent === "ASSISTANT" || agent === "SHOPPING" ? null : agent;
+  const isClient = agent === "HIRING";
+  // The freelancer's routing assistant sends no agent; clients never choose one.
+  const apiAgent = agent === "ASSISTANT" || isClient ? null : agent;
   const agentLabel = (a: AgentName) => t(`dock.agent.${a}` as MessageKey);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [entries, setEntries] = useState<Entry[]>([]);
@@ -149,11 +123,11 @@ export function ChatPanel(props: {
   const pending = useRef("");
   const frame = useRef<number | null>(null);
   const [past, setPast] = useState<{ id: string; agent: AgentName; updated_at: string }[]>([]);
-  const [paid, setPaid] = useState<Record<string, CaptureOutcome>>({});
+  const [paid, setPaid] = useState<Record<string, { amount: string; status: string }>>({});
   const bottom = useRef<HTMLDivElement>(null);
   // The open conversation is remembered per chat, so leaving the page and coming back resumes it.
-  const storageKey = chatStorageKey(agent, props.productId, props.resumeKey);
-  const listQuery = isBuyer ? "?agent=SHOPPING" : apiAgent ? `?agent=${apiAgent}` : "";
+  const storageKey = chatStorageKey(agent, props.subjectId, props.resumeKey);
+  const listQuery = isClient ? `?agent=${agent}` : apiAgent ? `?agent=${apiAgent}` : "";
 
   useEffect(() => {
     onBusyChange?.(busy);
@@ -239,7 +213,12 @@ export function ChatPanel(props: {
       const res = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text, session_id: sessionId, agent: apiAgent, product_id: props.productId ?? null }),
+        body: JSON.stringify({
+          text,
+          session_id: sessionId,
+          agent: apiAgent,
+          ...(agent === "PROFILE" ? { service_id: props.subjectId ?? null } : {}),
+        }),
       });
       if (!res.ok || !res.body) {
         const err = (await res.json().catch(() => null)) as { error?: { message: string } } | null;
@@ -330,23 +309,10 @@ export function ChatPanel(props: {
                 </p>
               );
             const tn = e.turn;
-            const products = tn ? productsOf(tn) : [];
             return (
               <div key={i} className="space-y-2">
                 {e.agent && <p className="text-xs font-medium text-ink-3">{t("chat.assistantOf", { agent: agentLabel(e.agent) })}</p>}
                 <Markdown text={e.text} className="rounded-lg bg-sheet-2 px-3 py-2 text-sm text-ink" />
-                {products.length > 0 && (
-                  <div className="grid gap-2 @min-[360px]:grid-cols-2">
-                    {products.map((p) => (
-                      <div key={p.listing_id} className="rounded-md border border-rule bg-sheet p-2.5 text-sm">
-                        <p className="font-medium text-ink">{p.title}</p>
-                        <p className="text-ink-3">{typeof p.seller === "string" ? p.seller : p.seller.name}</p>
-                        <p className="num font-semibold text-ink">{p.price.display}</p>
-                        <p className="line-clamp-3 text-xs text-ink-3">{p.summary ?? p.description}</p>
-                      </div>
-                    ))}
-                  </div>
-                )}
                 {tn?.pendingApprovals.map((a) => {
                   const amount = a.amount?.display ?? a.total_including_fees?.display;
                   return (
@@ -358,25 +324,33 @@ export function ChatPanel(props: {
                     </div>
                   );
                 })}
-                {tn?.checkoutLinks.map((c) =>
-                  paid[c.order_id] ? (
+                {tn?.checkoutLinks.map((c) => {
+                  const key = c.milestone_id;
+                  const amount = c.amount;
+                  const done = paid[key];
+                  return done ? (
                     <p key={c.paypal_order_id} className="rounded-md bg-positive-soft px-3 py-2 text-sm text-positive-ink">
-                      {t("chat.paid", { amount: paid[c.order_id]!.total.display, status: paid[c.order_id]!.order_status })}
+                      {t("chat.funded", { amount: done.amount, status: done.status })}
                     </p>
                   ) : (
                     <div key={c.paypal_order_id} className="rounded-md border border-rule bg-sheet p-3 text-sm">
-                      <p className="mb-2 text-ink-2">{t("chat.approvePayPal", { amount: c.total.display })}</p>
+                      <p className="mb-2 text-ink-2">{t("chat.approveMilestone", { amount: amount.display })}</p>
                       <PayPalButtons
                         clientId={props.paypalClientId ?? null}
-                        currency={c.total.currency}
-                        cartId={c.order_id}
+                        currency={amount.currency}
+                        contractId={c.contract_id}
                         paypalOrderId={c.paypal_order_id}
                         approveUrl={c.approve_url}
-                        onPaid={(o) => setPaid((p) => ({ ...p, [c.order_id]: o }))}
+                        onPaid={(o) =>
+                          setPaid((p) => ({
+                            ...p,
+                            [key]: { amount: o.amount.display, status: o.milestone_state },
+                          }))
+                        }
                       />
                     </div>
-                  ),
-                )}
+                  );
+                })}
               </div>
             );
           })}

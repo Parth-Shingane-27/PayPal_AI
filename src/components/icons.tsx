@@ -42,13 +42,6 @@ export const IconCoins = ({ className }: P) => (
     <path d="M9 17c0 1.4 2.7 2.5 6 2.5s6-1.1 6-2.5v-5c0-1.4-2.7-2.5-6-2.5" />
   </svg>
 );
-export const IconTruck = ({ className }: P) => (
-  <svg {...base(className)}>
-    <path d="M2 6h12v10H2zM14 10h4l4 4v2h-8" />
-    <circle cx="6" cy="18" r="2" />
-    <circle cx="18" cy="18" r="2" />
-  </svg>
-);
 export const IconCheck = ({ className }: P) => (
   <svg {...base(className)}>
     <rect x="3" y="3" width="18" height="18" rx="2" />
@@ -69,13 +62,6 @@ export const IconBag = ({ className }: P) => (
   <svg {...base(className)}>
     <path d="M5 8h14l-1 12H6z" />
     <path d="M9 8V6a3 3 0 0 1 6 0v2" />
-  </svg>
-);
-export const IconCart = ({ className }: P) => (
-  <svg {...base(className)}>
-    <path d="M3 4h2l2.4 11h10.2L20 8H7" />
-    <circle cx="9" cy="19" r="1.5" />
-    <circle cx="17" cy="19" r="1.5" />
   </svg>
 );
 export const IconReceipt = ({ className }: P) => (

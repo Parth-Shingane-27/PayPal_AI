@@ -1,16 +1,27 @@
 import type { AgentName } from "@/generated/prisma/client";
-import { listingAgent } from "./listing";
-import { operationsAgent } from "./operations";
+import { AppError } from "../errors";
+import { hiringAgent } from "./hiring";
+import { profileAgent } from "./profile";
+import { projectsAgent } from "./projects";
 import type { AgentSpec } from "./runtime";
-import { shoppingAgent } from "./shopping";
 import { treasuryAgent } from "./treasury";
 
-/** The four specialists, one folder each. Tool lists are fixed per agent so the prompt prefix is stable. */
-export const AGENTS: Record<AgentName, AgentSpec> = {
-  LISTING: listingAgent,
-  SHOPPING: shoppingAgent,
+/** The four GlobalGig specialists, one folder each. Tool lists are fixed per agent so the prompt prefix is stable. */
+export const AGENTS = {
+  PROFILE: profileAgent,
+  HIRING: hiringAgent,
   TREASURY: treasuryAgent,
-  OPERATIONS: operationsAgent,
-};
+  PROJECTS: projectsAgent,
+} satisfies Partial<Record<AgentName, AgentSpec>>;
 
-export const SELLER_AGENT_NAMES = ["LISTING", "TREASURY", "OPERATIONS"] as const satisfies readonly AgentName[];
+export type GigAgentName = keyof typeof AGENTS;
+
+/** The spec for a session's agent. */
+export function agentSpec(name: AgentName): AgentSpec {
+  const spec = (AGENTS as Partial<Record<AgentName, AgentSpec>>)[name];
+  if (!spec) throw new AppError("CONFLICT", "This conversation belongs to an assistant that has been replaced. Please start a new chat.");
+  return spec;
+}
+
+/** Agents a freelancer can open or be routed to. Clients only ever reach HIRING. */
+export const FREELANCER_AGENT_NAMES = ["PROFILE", "TREASURY", "PROJECTS"] as const satisfies readonly AgentName[];

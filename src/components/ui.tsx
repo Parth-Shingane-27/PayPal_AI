@@ -5,18 +5,11 @@
 
 export { CountryStamp, MarketStamp, Money, StatusStamp } from "./stamps";
 
-export function ProductThumb({ src, alt, size = 36 }: { src: string | null | undefined; alt: string; size?: number }) {
-  if (!src) return <span className="inline-block shrink-0 rounded-[3px] bg-sheet-2" style={{ width: size, height: size }} aria-hidden />;
-  // Generated SVG art from /api/art; plain <img> keeps it simple and cacheable.
-  // eslint-disable-next-line @next/next/no-img-element
-  return <img src={src} alt={alt} width={size} height={size} loading="lazy" className="shrink-0 rounded-[3px] border border-rule" />;
-}
-
 export { Sparkline } from "./Sparkline";
 
 /**
  * Where one sale's money went, as a single segmented bar:
- * net to maker, PayPal, platform, FX, refunds — chart slots 1-5 in fixed order.
+ * net to freelancer, PayPal, platform, FX, refunds — chart slots 1-5 in fixed order.
  */
 export function FeeBar({
   gross,

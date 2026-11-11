@@ -3,22 +3,22 @@
 import { usePathname } from "next/navigation";
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { setDockOpen, setOverlayOpen } from "./dock-store";
-import { AGENTS_FOR, chatStorageKey, type DockAgent, defaultAgentFor, productIdFor, type DockRole } from "./route-context";
+import { AGENTS_FOR, chatStorageKey, type DockAgent, defaultAgentFor, serviceIdFor, type DockRole } from "./route-context";
 
 /** What a page tells the assistant panel about itself. */
 export type PageAssistant = {
   agent: DockAgent;
-  /** The product this page is about (the Listing agent keeps a conversation per product). */
-  productId?: string;
-  /** Scopes the remembered conversation, e.g. "new-product" on the Products list. */
+  /** The service this page is about (the Profile agent keeps a conversation per service). */
+  subjectId?: string;
+  /** Scopes the remembered conversation, e.g. "new-service" on the Services list. */
   resumeKey?: string;
-  /** One line saying what the chat is about ("Quaderno in carta marmorizzata"), shown under the panel title. */
+  /** One line saying what the chat is about ("Logo design for a Berlin café"), shown under the panel title. */
   contextLabel?: string;
   /** Called after each completed reply, so the page can refresh what the assistant may have changed. */
   onResult?: () => void;
 };
 
-export type ChatScope = { productId?: string; resumeKey?: string };
+export type ChatScope = { subjectId?: string; resumeKey?: string };
 
 type Ctx = {
   role: DockRole;
@@ -59,7 +59,7 @@ export function openAssistant(detail: OpenDetail = {}): void {
   window.dispatchEvent(new CustomEvent<OpenDetail>(OPEN_EVENT, { detail }));
 }
 
-export function AssistantProvider({ role, paypalClientId, market, children }: { role: DockRole; paypalClientId: string | null; /** A buyer's market, which scopes their conversation. */ market?: string; children: React.ReactNode }) {
+export function AssistantProvider({ role, paypalClientId, market, children }: { role: DockRole; paypalClientId: string | null; /** A client's market, which scopes their conversation. */ market?: string; children: React.ReactNode }) {
   const pathname = usePathname();
   const agents = AGENTS_FOR[role];
   const [page, setPage] = useState<{ token: symbol; cfg: PageAssistant } | null>(null);
@@ -72,9 +72,10 @@ export function AssistantProvider({ role, paypalClientId, market, children }: { 
 
   const scopeFor = useCallback(
     (agent: DockAgent): ChatScope => {
-      if (page?.cfg.agent === agent) return { productId: page.cfg.productId, resumeKey: page.cfg.resumeKey ?? (agent === "SHOPPING" ? market : undefined) };
-      if (agent === "LISTING") return { productId: productIdFor(pathname) };
-      if (agent === "SHOPPING") return { resumeKey: market };
+      // subjectId carries the page's subject: a service (Profile).
+      if (page?.cfg.agent === agent) return { subjectId: page.cfg.subjectId, resumeKey: page.cfg.resumeKey ?? (agent === "HIRING" ? market : undefined) };
+      if (agent === "PROFILE") return { subjectId: serviceIdFor(pathname) };
+      if (agent === "HIRING") return { resumeKey: market };
       return {};
     },
     [page, pathname, market],
@@ -107,7 +108,7 @@ export function AssistantProvider({ role, paypalClientId, market, children }: { 
         // Remember it first: if the target chat is not mounted yet it reads this when it mounts; if it is, the event switches it.
         const sc = scopeForRef.current(target);
         try {
-          localStorage.setItem(chatStorageKey(target, sc.productId, sc.resumeKey), d.sessionId);
+          localStorage.setItem(chatStorageKey(target, sc.subjectId, sc.resumeKey), d.sessionId);
         } catch {
           // Storage blocked: the chat just opens on a fresh conversation.
         }
@@ -129,7 +130,7 @@ export function AssistantProvider({ role, paypalClientId, market, children }: { 
 
 /**
  * A page's say in what the assistant panel does: which agent it opens on, which
- * product it is about, and what to refresh after a reply. Call it once per page.
+ * service it is about, and what to refresh after a reply. Call it once per page.
  */
 export function usePageAssistant(cfg: PageAssistant): void {
   const { register, unregister } = useAssistant();
@@ -137,10 +138,10 @@ export function usePageAssistant(cfg: PageAssistant): void {
   useEffect(() => {
     onResult.current = cfg.onResult;
   });
-  const { agent, productId, resumeKey, contextLabel } = cfg;
+  const { agent, subjectId, resumeKey, contextLabel } = cfg;
   useEffect(() => {
     const token = Symbol("page-assistant");
-    register(token, { agent, productId, resumeKey, contextLabel, onResult: () => onResult.current?.() });
+    register(token, { agent, subjectId, resumeKey, contextLabel, onResult: () => onResult.current?.() });
     return () => unregister(token);
-  }, [register, unregister, agent, productId, resumeKey, contextLabel]);
+  }, [register, unregister, agent, subjectId, resumeKey, contextLabel]);
 }

@@ -15,8 +15,8 @@ const isUniqueViolation = (e: unknown) => typeof e === "object" && e !== null &&
  *  - DISMISSED/SNOOZED stay hidden while the detector keeps firing;
  *  - open rows whose detector stopped firing -> RESOLVED.
  */
-export async function reconcileFindings(sellerId: string, detections: Detection[], now = new Date()): Promise<ReconcileResult> {
-  const open = await prisma.finding.findMany({ where: { seller_id: sellerId, status: { not: "RESOLVED" } } });
+export async function reconcileFindings(freelancerId: string, detections: Detection[], now = new Date()): Promise<ReconcileResult> {
+  const open = await prisma.finding.findMany({ where: { freelancer_id: freelancerId, status: { not: "RESOLVED" } } });
   const byFp = new Map(open.map((f) => [f.fingerprint, f]));
   const seen = new Set<string>();
   const result: ReconcileResult = { created: [], refreshed: 0, resolved: 0 };
@@ -40,7 +40,7 @@ export async function reconcileFindings(sellerId: string, detections: Detection[
       result.created.push(
         await prisma.finding.create({
           data: {
-            seller_id: sellerId,
+            freelancer_id: freelancerId,
             agent: d.agent,
             type: d.type,
             fingerprint: fp,
@@ -69,10 +69,10 @@ export async function reconcileFindings(sellerId: string, detections: Detection[
 const SEVERITY_RANK = { HIGH: 0, MEDIUM: 1, LOW: 2 } as const;
 
 /** Visible findings for the feed: not resolved, not dismissed, not currently snoozed. */
-export async function listFindings(sellerId: string, opts: { agent?: "TREASURY" | "OPERATIONS"; now?: Date } = {}): Promise<Finding[]> {
+export async function listFindings(freelancerId: string, opts: { agent?: "TREASURY" | "PROJECTS"; now?: Date } = {}): Promise<Finding[]> {
   const now = opts.now ?? new Date();
   const where: Prisma.FindingWhereInput = {
-    seller_id: sellerId,
+    freelancer_id: freelancerId,
     ...(opts.agent ? { agent: opts.agent } : {}),
     OR: [{ status: { in: ["NEW", "SEEN", "ACTED"] } }, { status: "SNOOZED", snoozed_until: { lte: now } }],
   };
@@ -80,36 +80,36 @@ export async function listFindings(sellerId: string, opts: { agent?: "TREASURY" 
   return rows.sort((a, b) => SEVERITY_RANK[a.severity] - SEVERITY_RANK[b.severity] || b.last_seen_at.getTime() - a.last_seen_at.getTime());
 }
 
-export async function countNewFindings(sellerId: string): Promise<number> {
-  return prisma.finding.count({ where: { seller_id: sellerId, status: "NEW" } });
+export async function countNewFindings(freelancerId: string): Promise<number> {
+  return prisma.finding.count({ where: { freelancer_id: freelancerId, status: "NEW" } });
 }
 
 /** New (unseen) findings per agent, for the nav badges. */
-export async function newFindingCounts(sellerId: string): Promise<{ TREASURY: number; OPERATIONS: number }> {
-  const rows = await prisma.finding.groupBy({ by: ["agent"], where: { seller_id: sellerId, status: "NEW" }, _count: true });
+export async function newFindingCounts(freelancerId: string): Promise<{ TREASURY: number; PROJECTS: number }> {
+  const rows = await prisma.finding.groupBy({ by: ["agent"], where: { freelancer_id: freelancerId, status: "NEW" }, _count: true });
   const n = (a: string) => rows.find((r) => r.agent === a)?._count ?? 0;
-  return { TREASURY: n("TREASURY"), OPERATIONS: n("OPERATIONS") };
+  return { TREASURY: n("TREASURY"), PROJECTS: n("PROJECTS") };
 }
 
-/** Another seller's id is indistinguishable from a missing one. */
-async function owned(id: string, sellerId: string): Promise<Finding | null> {
-  return prisma.finding.findFirst({ where: { id, seller_id: sellerId } });
+/** Another freelancer's id is indistinguishable from a missing one. */
+async function owned(id: string, freelancerId: string): Promise<Finding | null> {
+  return prisma.finding.findFirst({ where: { id, freelancer_id: freelancerId } });
 }
 
-async function setStatus(id: string, sellerId: string, data: Prisma.FindingUpdateInput): Promise<Finding | null> {
-  if (!(await owned(id, sellerId))) return null;
+async function setStatus(id: string, freelancerId: string, data: Prisma.FindingUpdateInput): Promise<Finding | null> {
+  if (!(await owned(id, freelancerId))) return null;
   return prisma.finding.update({ where: { id }, data });
 }
 
-export const markSeen = (id: string, sellerId: string) => setStatus(id, sellerId, { status: "SEEN" });
-export const dismissFinding = (id: string, sellerId: string) => setStatus(id, sellerId, { status: "DISMISSED" });
-export const markActed = (id: string, sellerId: string) => setStatus(id, sellerId, { status: "ACTED" });
-export function snoozeFinding(id: string, sellerId: string, days: number, now = new Date()) {
-  return setStatus(id, sellerId, { status: "SNOOZED", snoozed_until: new Date(now.getTime() + days * 86_400_000) });
+export const markSeen = (id: string, freelancerId: string) => setStatus(id, freelancerId, { status: "SEEN" });
+export const dismissFinding = (id: string, freelancerId: string) => setStatus(id, freelancerId, { status: "DISMISSED" });
+export const markActed = (id: string, freelancerId: string) => setStatus(id, freelancerId, { status: "ACTED" });
+export function snoozeFinding(id: string, freelancerId: string, days: number, now = new Date()) {
+  return setStatus(id, freelancerId, { status: "SNOOZED", snoozed_until: new Date(now.getTime() + days * 86_400_000) });
 }
 
-/** Counts per fingerprint of how often the seller dismissed it; feeds the agent's context. */
-export async function dismissedTypes(sellerId: string): Promise<Record<string, number>> {
-  const rows = await prisma.finding.groupBy({ by: ["fingerprint"], where: { seller_id: sellerId, status: "DISMISSED" }, _count: true });
+/** Counts per fingerprint of how often the freelancer dismissed it; feeds the agent's context. */
+export async function dismissedTypes(freelancerId: string): Promise<Record<string, number>> {
+  const rows = await prisma.finding.groupBy({ by: ["fingerprint"], where: { freelancer_id: freelancerId, status: "DISMISSED" }, _count: true });
   return Object.fromEntries(rows.map((r) => [r.fingerprint, r._count]));
 }

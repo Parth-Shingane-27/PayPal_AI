@@ -178,7 +178,7 @@ export async function runAgent(input: RunInput): Promise<RunResult> {
         await recordToolCall(audit, { id, tool: name || "(unnamed)", input: args, status: "FAILED", error, durationMs: Date.now() - t0 });
         return finish(false, errorResponse("UNKNOWN_TOOL", error), { error });
       }
-      // .strict(): an extra key (say, an injected "seller_id") is an error, not silently dropped.
+      // .strict(): an extra key (say, an injected "freelancer_id") is an error, not silently dropped.
       const parsed = tool.input.strict().safeParse(args);
       if (!parsed.success) {
         const error = `Invalid input for ${tool.name}: ${describeIssues(parsed.error)}. Correct the input and call the tool again.`;
@@ -186,7 +186,7 @@ export async function runAgent(input: RunInput): Promise<RunResult> {
         return finish(false, errorResponse("INVALID_INPUT", error), { error });
       }
       if (tool.name === "handoff" && (handoff || input.handoffAllowed === false)) {
-        const error = "Only one handoff is allowed per message. Handle this request yourself or tell the seller which assistant to ask.";
+        const error = "Only one handoff is allowed per message. Handle this request yourself or tell the user which assistant to ask.";
         await recordToolCall(audit, { id, tool: tool.name, input: parsed.data, status: "FAILED", error, durationMs: Date.now() - t0 });
         return finish(false, errorResponse("HANDOFF_LIMIT", error), { error });
       }
@@ -198,7 +198,7 @@ export async function runAgent(input: RunInput): Promise<RunResult> {
           await recordToolCall(audit, { id, tool: tool.name, input: parsed.data, output, status: "SUCCEEDED", durationMs: Date.now() - t0 });
         }
         if (tool.kind === "proposal") pendingApprovals.push(output);
-        if (tool.name === "create_paypal_order") checkoutLinks.push(output);
+        if (tool.name === "create_milestone_payment") checkoutLinks.push(output);
         if (tool.name === "handoff") handoff = (output as { handoff: NonNullable<RunResult["handoff"]> }).handoff;
         return finish(true, { output }, { output });
       } catch (err) {

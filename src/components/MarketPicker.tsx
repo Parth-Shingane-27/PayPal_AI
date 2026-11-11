@@ -8,7 +8,10 @@ import { useT } from "./i18n/I18nProvider";
 
 type Market = { locale: string; language: string; currency: string; country: string };
 
-/** The buyer's market and language; stored in the signed session cookie. */
+/**
+ * The client's market and language; stored in the signed session cookie and
+ * posted to /api/client/market.
+ */
 export function MarketPicker({ current }: { current: string }) {
   const router = useRouter();
   const t = useT();
@@ -23,7 +26,7 @@ export function MarketPicker({ current }: { current: string }) {
         className="min-h-11 rounded-md border border-rule-strong bg-sheet py-1 pl-3 text-ink md:min-h-10"
         value={current}
         onChange={async (e) => {
-          await api("/api/me/market", { body: { locale: e.target.value } });
+          await api("/api/client/market", { body: { locale: e.target.value } });
           router.refresh();
         }}
       >

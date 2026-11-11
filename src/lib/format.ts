@@ -77,14 +77,6 @@ export function moneyCsv(m: MoneyLike | null | undefined): string {
   return `${(m.amount_minor / 10 ** exp).toFixed(exp)} ${m.currency}`;
 }
 
-export const ORDER_STATUS_LABEL: Record<string, string> = {
-  PAID: "Paid",
-  PARTIALLY_REFUNDED: "Part refunded",
-  REFUNDED: "Refunded",
-  PENDING_PAYMENT: "Payment failed",
-  CART: "In cart",
-};
-
 export const LANGUAGE_OF: Record<string, string> = {
   "en-US": "English",
   "en-GB": "English",

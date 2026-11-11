@@ -5,24 +5,24 @@ import { AppError } from "../errors";
 import { type AuditCtx, recordModelRun } from "../services/audit";
 import { groqClient } from "./model";
 import { ROUTER_PROMPT } from "./router-prompt";
-import { SELLER_AGENT_NAMES } from "./registry";
+import { FREELANCER_AGENT_NAMES } from "./registry";
 import { jsonSchemaFor } from "./tool";
 
 /**
- * The seller "Assistant" box routes each NEW conversation with one Groq
+ * The freelancer "Assistant" box routes each NEW conversation with one Groq
  * structured-output call (strict json_schema). The conversation then stays
  * with the chosen agent.
  */
 
 const routeSchema = z.object({
-  agent: z.enum(SELLER_AGENT_NAMES),
+  agent: z.enum(FREELANCER_AGENT_NAMES),
   reason: z.string(),
 });
 export type Route = z.infer<typeof routeSchema>;
 
 export type Classifier = (text: string, audit: AuditCtx) => Promise<Route>;
 
-const UNROUTABLE = "I couldn't tell which assistant should handle that. Please open Listings, Treasury or Operations directly.";
+const UNROUTABLE = "I couldn't tell which assistant should handle that. Please open Services, Earnings or Projects directly.";
 
 function groqErrorMessage(err: unknown): string {
   if (err instanceof Groq.RateLimitError) return "The routing service is busy. Please try again shortly, or open a specific assistant.";

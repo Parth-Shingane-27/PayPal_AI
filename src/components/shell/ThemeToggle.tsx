@@ -5,7 +5,7 @@ import { useT } from "../i18n/I18nProvider";
 import { IconMoon, IconSun } from "../icons";
 
 type Theme = "light" | "dark";
-const KEY = "gc-theme-v2";
+const KEY = "gg-theme-v2";
 const listeners = new Set<() => void>();
 
 function current(): Theme {

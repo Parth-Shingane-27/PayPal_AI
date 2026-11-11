@@ -11,7 +11,7 @@ export const UI_LANGS = [
   { code: "it", name: "Italiano", locale: "it-IT" },
 ] as const;
 export type UiLang = (typeof UI_LANGS)[number]["code"];
-export const LANG_COOKIE = "gc-lang";
+export const LANG_COOKIE = "gg-lang";
 
 export function isUiLang(v: string | undefined | null): v is UiLang {
   return UI_LANGS.some((l) => l.code === v);

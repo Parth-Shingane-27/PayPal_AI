@@ -20,6 +20,8 @@ const coreSchema = z.object({
     .default("false")
     .transform((v) => v === "true"),
   PLATFORM_FEE_BPS: z.coerce.number().int().min(0).max(5000).default(500),
+  /** Days after delivery before the worker releases a milestone the client has not answered. */
+  AUTO_RELEASE_DAYS: z.coerce.number().int().min(1).max(60).default(7),
 });
 
 const reasoningEffort = z.enum(["low", "medium", "high"]);
@@ -27,7 +29,7 @@ const reasoningEffort = z.enum(["low", "medium", "high"]);
 const groqSchema = z.object({
   GROQ_API_KEY: nonEmpty,
   // Production models with strict json_schema and strict tool support: openai/gpt-oss-20b, openai/gpt-oss-120b.
-  /** Routes new seller conversations and writes listing copy (one structured-output call each). */
+  /** Routes new freelancer conversations and writes service-page copy (one structured-output call each). */
   GROQ_MODEL: nonEmpty.default("openai/gpt-oss-20b"),
   GROQ_REASONING_EFFORT: reasoningEffort.default("low"),
   /** Runs the four agents (multi-step tool use). */
@@ -41,7 +43,7 @@ const paypalSchema = z.object({
   PAYPAL_ENV: z.enum(["sandbox", "live"]).default("sandbox"),
   PAYPAL_CLIENT_ID: nonEmpty,
   PAYPAL_CLIENT_SECRET: nonEmpty,
-  PAYPAL_BRAND_NAME: nonEmpty.default("GlobalCart"),
+  PAYPAL_BRAND_NAME: nonEmpty.default("GlobalGig"),
 });
 
 const paypalWebhookSchema = z.object({ PAYPAL_WEBHOOK_ID: nonEmpty });

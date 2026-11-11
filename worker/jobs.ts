@@ -1,25 +1,29 @@
 import { DelayedError, type Job, Queue, Worker } from "bullmq";
 import { prisma } from "@/server/db";
 import { proactiveEnabled } from "@/server/config";
-import { enqueueEmbedding, type EmbeddingJob, type PayoutJob, QUEUE_NAMES, queuePrefix, redisConnection, scheduleDailyWatch, schedulePayoutJob, type WatchJob, type WebhookJob } from "@/server/queue";
-import { runWatch, sellerIds } from "@/server/proactive/watcher";
-import { payoutsNeedingJobs, runPayout } from "@/server/services/payouts";
-import { embedListing, listingsMissingEmbeddings } from "@/server/services/search";
+import { enqueueGigEmbedding, type EmbeddingJob, type PayoutJob, QUEUE_NAMES, queuePrefix, redisConnection, scheduleDailyWatch, schedulePayoutJob, type WatchJob, type WebhookJob } from "@/server/queue";
+import { freelancerIds, runWatch } from "@/server/proactive/watcher";
+import { sweepAutoReleases } from "@/server/services/gig/milestones";
+import { freelancerPayoutsNeedingJobs, runFreelancerPayout } from "@/server/services/gig/payouts";
+import { embedFreelancer, embedServicePage, gigEmbeddingsMissing } from "@/server/services/gig/search";
 import { processWebhookEvent } from "@/server/services/webhooks";
 
 const PAYOUT_POLL_MS = 60_000;
 const RECONCILE_MS = 60_000;
+/** How often the auto-release sweep looks for delivered milestones past their countdown. */
+export const AUTO_RELEASE_SWEEP_MS = 60_000;
 
 export async function webhookProcessor(job: Job<WebhookJob>) {
   return processWebhookEvent(job.data.eventId);
 }
 
 export async function watchProcessor(job: Job<WatchJob>) {
-  return runWatch(job.data.sellerId);
+  return runWatch(job.data.freelancerId);
 }
 
 async function embeddingProcessor(job: Job<EmbeddingJob>) {
-  return embedListing(job.data.listingId);
+  const d = job.data;
+  return d.kind === "service_page" ? embedServicePage(d.id) : embedFreelancer(d.id);
 }
 
 /**
@@ -27,7 +31,7 @@ async function embeddingProcessor(job: Job<EmbeddingJob>) {
  * delayed set (job id stays = payout id) until the batch finishes.
  */
 export async function payoutProcessor(job: Job<PayoutJob>, token?: string) {
-  const outcome = await runPayout(job.data.payoutId);
+  const outcome = await runFreelancerPayout(job.data.payoutId);
   if (outcome === "POLL") {
     await job.moveToDelayed(Date.now() + PAYOUT_POLL_MS, token);
     throw new DelayedError();
@@ -41,7 +45,8 @@ export async function payoutProcessor(job: Job<PayoutJob>, token?: string) {
  */
 export async function reconcilePayouts(payouts: Queue): Promise<number> {
   let fixed = 0;
-  for (const p of await payoutsNeedingJobs()) {
+  const all = await freelancerPayoutsNeedingJobs();
+  for (const p of all) {
     const job = await payouts.getJob(p.id);
     if (!job) {
       await schedulePayoutJob(p.id, p.status === "SCHEDULED" ? p.scheduled_for : new Date());
@@ -72,27 +77,37 @@ export function startWorkers() {
       .catch((err: unknown) => console.error("payout reconcile failed", err));
   void reconcile();
   const timer = setInterval(reconcile, RECONCILE_MS);
-  // Listings published while embeddings could not run get queued again on boot.
+  // Auto-release: plain code, no agent. Each release is a guarded state change,
+  // so overlapping sweeps (or two workers) release a milestone once.
+  const autoRelease = () =>
+    sweepAutoReleases()
+      .then((r) => r.released > 0 && console.log(`auto-released ${r.released} milestone(s)`))
+      .catch((err: unknown) => console.error("auto-release sweep failed", err));
+  void autoRelease();
+  const releaseTimer = setInterval(autoRelease, AUTO_RELEASE_SWEEP_MS);
+  // Pages published while embeddings could not run get queued again on boot.
   if (!process.env.VOYAGE_API_KEY?.trim()) {
     console.warn("VOYAGE_API_KEY is not set: skipping embedding backfill. Add it to .env and restart the worker.");
   } else {
-    void listingsMissingEmbeddings()
-      .then(async (ids) => {
-        for (const id of ids) await enqueueEmbedding(id);
-        if (ids.length) console.log(`queued ${ids.length} listing embedding(s)`);
+    void Promise.resolve()
+      .then(async () => {
+        const gig = await gigEmbeddingsMissing();
+        for (const t of gig) await enqueueGigEmbedding(t);
+        if (gig.length) console.log(`queued ${gig.length} service page / freelancer embedding(s)`);
       })
       .catch((err: unknown) => console.error("embedding backfill failed", err));
   }
 
-  // Proactive agents: make sure every seller has a daily check.
+  // Proactive agents: make sure every freelancer has a daily check.
   if (proactiveEnabled()) {
-    void sellerIds()
+    void freelancerIds()
       .then((ids) => Promise.all(ids.map(scheduleDailyWatch)))
       .catch((err: unknown) => console.error("proactive scheduling failed", err));
   }
 
   return async function stop() {
     clearInterval(timer);
+    clearInterval(releaseTimer);
     await Promise.all(workers.map((w) => w.close()));
     await payoutQueue.close();
     await prisma.$disconnect();
