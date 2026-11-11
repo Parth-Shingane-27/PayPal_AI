@@ -6,6 +6,7 @@ import { money, parseDecimal } from "../../domain/money";
 import { AppError, notFound } from "../../errors";
 import { actorId, asJson, type AuditCtx, gigCallContext, paypal as defaultPaypal } from "../audit";
 import type { ProposalAction } from "../audit";
+import { captureHeldPayment } from "./milestone-payments";
 import { afterRefundCompleted } from "./milestones";
 import { lockFreelancer } from "./owner";
 
@@ -43,7 +44,7 @@ export async function proposeMilestoneRefund(
     await lockFreelancer(tx, freelancerId);
     const ms = await tx.milestone.findFirst({ where: { id: input.milestoneId, freelancer_id: freelancerId }, include: { contract: { select: { locale: true } } } });
     if (!ms) throw notFound("Milestone");
-    const payment = await tx.milestonePayment.findFirst({ where: { milestone_id: ms.id, status: "COMPLETED" } });
+    const payment = await tx.milestonePayment.findFirst({ where: { milestone_id: ms.id, status: { in: ["COMPLETED", "AUTHORIZED"] } } });
     if (!payment || !(isInHolding(ms.state) || isReleased(ms.state))) {
       throw new AppError("NOT_REFUNDABLE", ms.state === "AWAITING_FUNDING" ? "This milestone was never funded, so there is nothing to refund." : `A ${ms.state.toLowerCase().replace(/_/g, " ")} milestone cannot be refunded.`);
     }
@@ -131,9 +132,51 @@ export async function executeMilestoneRefund(refundId: string, freelancerId: str
     if (r.from_holding && !isInHolding(r.milestone.state)) {
       throw new AppError("CONFLICT", `The milestone is now ${r.milestone.state.toLowerCase().replace(/_/g, " ")}; propose the refund again.`);
     }
-    if (!r.payment.capture_id || r.payment.capture_id.startsWith("SEED-")) throw new AppError("NOT_REFUNDABLE", "This payment has no real PayPal capture to refund.");
+    if (r.payment.status === "AUTHORIZED") {
+      if (!r.payment.authorization_id) throw new AppError("NOT_REFUNDABLE", "This payment has no PayPal authorization to release.");
+    } else if (!r.payment.capture_id || r.payment.capture_id.startsWith("SEED-")) {
+      throw new AppError("NOT_REFUNDABLE", "This payment has no real PayPal capture to refund.");
+    }
     return r;
   });
+
+  // A partial refund of a held payment (a settled dispute): the money has to be captured first, then part of it is refunded.
+  if (refund.payment.status === "AUTHORIZED" && refund.amount_minor !== refund.payment.gross_minor) {
+    await captureHeldPayment(refund.milestone_id, audit, { paypal: pp });
+    refund.payment = await prisma.milestonePayment.findUniqueOrThrow({ where: { id: refund.payment_id } });
+  }
+
+  // A full refund of a hold was never charged: "refunding" it means voiding the authorization.
+  if (refund.payment.status === "AUTHORIZED") {
+    try {
+      await pp.voidAuthorization(gigCallContext(audit, freelancerId), refund.payment.authorization_id!, `void-${refund.id}`);
+    } catch (err) {
+      const message = err instanceof PayPalApiError || err instanceof AppError ? err.message : "PayPal could not release the hold.";
+      await prisma.milestoneRefund.update({ where: { id: refund.id }, data: { status: "FAILED", error: message } });
+      throw new AppError("UPSTREAM_ERROR", `PayPal did not release the hold: ${message}`);
+    }
+    let effect: string | null = null;
+    await prisma.$transaction(async (tx) => {
+      await tx.milestonePayment.update({ where: { id: refund.payment_id }, data: { status: "VOIDED", failure_reason: "Hold released to the client" } });
+      await tx.milestoneRefund.update({
+        where: { id: refund.id },
+        data: { status: "COMPLETED", completed_at: new Date(), paypal_fee_returned_minor: 0, platform_fee_returned_minor: 0, freelancer_debit_minor: 0 },
+      });
+      effect = await afterRefundCompleted(tx, refund.id);
+    });
+    const m = (minor: number) => money(minor, refund.currency);
+    return {
+      refund_id: refund.id,
+      paypal_refund_id: null,
+      status: "COMPLETED" as const,
+      amount: m(refund.amount_minor),
+      from_holding: true,
+      paypal_fee_returned: m(0),
+      platform_fee_returned: m(0),
+      freelancer_debit: m(0),
+      milestone_effect: effect,
+    };
+  }
 
   let result;
   try {

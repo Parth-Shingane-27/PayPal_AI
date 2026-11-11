@@ -22,7 +22,7 @@ function loadSdk(clientId: string, currency: string): Promise<PayPalNamespace> {
   if (!p) {
     p = new Promise((resolve, reject) => {
       const s = document.createElement("script");
-      s.src = `https://www.paypal.com/sdk/js?client-id=${encodeURIComponent(clientId)}&currency=${currency}&intent=capture&components=buttons`;
+      s.src = `https://www.paypal.com/sdk/js?client-id=${encodeURIComponent(clientId)}&currency=${currency}&intent=authorize&components=buttons`;
       s.dataset.namespace = ns;
       s.onload = () => resolve((window as unknown as Record<string, PayPalNamespace>)[ns]!);
       s.onerror = () => reject(new Error("Could not load PayPal"));
@@ -33,7 +33,7 @@ function loadSdk(clientId: string, currency: string): Promise<PayPalNamespace> {
   return p;
 }
 
-/** A milestone funding capture: the money is now in holding until the client accepts the delivery. */
+/** A milestone funding hold: the money is reserved on PayPal, not charged, until the client accepts the delivery. */
 export type MilestoneCaptureOutcome = { contract_id: string; milestone_id: string; milestone_state: string; payment_status: string; amount: { display: string }; already_captured: boolean };
 
 /**

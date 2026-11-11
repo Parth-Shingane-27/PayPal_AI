@@ -47,7 +47,7 @@ describe("agent definitions", () => {
       PROFILE: ["get_service", "preview_service", "create_service", "list_markets", "market_overview", "research_market_rates", "get_fx_rate", "suggest_rate", "save_service_draft", "reprice_service", "handoff"],
       HIRING: ["search_freelancers", "compare_freelancers", "draft_brief", "request_quote", "view_quote", "propose_milestone_plan", "create_milestone_payment"],
       TREASURY: ["get_balances", "estimate_fees", "forecast_earnings", "compare_direct_invoicing", "propose_payout_schedule", "get_invoice", "handoff"],
-      PROJECTS: ["query_contracts", "get_contract_details", "get_milestone_status", "earnings_by_client", "earnings_by_market", "detect_anomalies", "propose_refund", "draft_delivery_note", "handoff"],
+      PROJECTS: ["query_contracts", "get_contract_details", "get_milestone_status", "earnings_by_client", "earnings_by_market", "detect_anomalies", "propose_refund", "draft_delivery_note", "draft_acceptance_criteria", "handoff"],
     });
     expect(AGENTS.PROFILE.maxModelCalls).toBe(40);
     expect(AGENTS.HIRING.maxModelCalls).toBe(15);

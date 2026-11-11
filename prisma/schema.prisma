@@ -20,6 +20,8 @@ datasource db {
 enum PaymentStatus {
   CREATED
   PENDING
+  /// Money is on a PayPal authorization hold: reserved on the client's side, not charged.
+  AUTHORIZED
   COMPLETED
   DECLINED
   FAILED
@@ -682,20 +684,55 @@ model Milestone {
   created_at      DateTime       @default(now()) @db.Timestamptz(3)
   updated_at      DateTime       @updatedAt @db.Timestamptz(3)
 
-  contract    Contract           @relation(fields: [contract_id], references: [id], onDelete: Cascade)
-  freelancer  Freelancer         @relation(fields: [freelancer_id], references: [id])
-  client      Client             @relation(fields: [client_id], references: [id])
+  contract    Contract              @relation(fields: [contract_id], references: [id], onDelete: Cascade)
+  freelancer  Freelancer            @relation(fields: [freelancer_id], references: [id])
+  client      Client                @relation(fields: [client_id], references: [id])
   payments    MilestonePayment[]
   refunds     MilestoneRefund[]
   events      MilestoneEvent[]
   invoice     Invoice?
   attachments Attachment[]
+  criteria    AcceptanceCriterion[]
 
   @@unique([contract_id, position])
   @@index([freelancer_id, state])
   @@index([client_id, state])
   @@index([state, auto_release_at])
   @@map("milestones")
+}
+
+enum CriterionStatus {
+  PENDING
+  PASSED
+  FAILED
+}
+
+enum CriterionSource {
+  AI
+  FREELANCER
+  CLIENT
+}
+
+/// One checkable acceptance criterion of a milestone. Its text is locked once
+/// both sides have signed; only the client's verdict (PASSED / FAILED) changes.
+model AcceptanceCriterion {
+  id                   String          @id @default(uuid(7)) @db.Uuid
+  milestone_id         String          @db.Uuid
+  position             Int
+  text                 String
+  source               CriterionSource
+  status               CriterionStatus @default(PENDING)
+  client_signed_at     DateTime?       @db.Timestamptz(3)
+  freelancer_signed_at DateTime?       @db.Timestamptz(3)
+  verdict_note         String?
+  decided_at           DateTime?       @db.Timestamptz(3)
+  created_at           DateTime        @default(now()) @db.Timestamptz(3)
+  updated_at           DateTime        @updatedAt @db.Timestamptz(3)
+
+  milestone Milestone @relation(fields: [milestone_id], references: [id], onDelete: Cascade)
+
+  @@unique([milestone_id, position])
+  @@map("acceptance_criteria")
 }
 
 /// Every milestone state change, with who made it.
@@ -723,30 +760,34 @@ model MilestoneEvent {
 /// One row per PayPal order attempt for a milestone. Fees are measured at
 /// capture; net_to_freelancer is recorded when the milestone is released.
 model MilestonePayment {
-  id                      String        @id @default(uuid(7)) @db.Uuid
-  milestone_id            String        @db.Uuid
-  contract_id             String        @db.Uuid
-  freelancer_id           String        @db.Uuid
-  client_id               String        @db.Uuid
-  paypal_order_id         String        @unique
-  approve_url             String?
+  id                       String        @id @default(uuid(7)) @db.Uuid
+  milestone_id             String        @db.Uuid
+  contract_id              String        @db.Uuid
+  freelancer_id            String        @db.Uuid
+  client_id                String        @db.Uuid
+  paypal_order_id          String        @unique
+  approve_url              String?
   /// `${milestoneId}-${uuid}`: PayPal invoice_id and PayPal-Request-Id.
-  paypal_invoice_id       String        @unique
-  status                  PaymentStatus @default(CREATED)
-  currency                String        @db.Char(3)
-  gross_minor             Int
-  paypal_fee_minor        Int?
-  fee_is_estimate         Boolean       @default(false)
-  platform_fee_minor      Int?
-  fx_cost_minor           Int?
+  paypal_invoice_id        String        @unique
+  status                   PaymentStatus @default(CREATED)
+  currency                 String        @db.Char(3)
+  gross_minor              Int
+  paypal_fee_minor         Int?
+  fee_is_estimate          Boolean       @default(false)
+  platform_fee_minor       Int?
+  fx_cost_minor            Int?
   /// Set on release: gross - PayPal fee - platform fee - FX cost (less anything refunded before release).
-  net_to_freelancer_minor Int?
-  capture_id              String?       @unique
-  failure_reason          String?
-  captured_at             DateTime?     @db.Timestamptz(3)
-  released_at             DateTime?     @db.Timestamptz(3)
-  created_at              DateTime      @default(now()) @db.Timestamptz(3)
-  updated_at              DateTime      @updatedAt @db.Timestamptz(3)
+  net_to_freelancer_minor  Int?
+  capture_id               String?       @unique
+  /// PayPal authorization id while (and after) the money was held before capture.
+  authorization_id         String?       @unique
+  authorized_at            DateTime?     @db.Timestamptz(3)
+  authorization_expires_at DateTime?     @db.Timestamptz(3)
+  failure_reason           String?
+  captured_at              DateTime?     @db.Timestamptz(3)
+  released_at              DateTime?     @db.Timestamptz(3)
+  created_at               DateTime      @default(now()) @db.Timestamptz(3)
+  updated_at               DateTime      @updatedAt @db.Timestamptz(3)
 
   milestone  Milestone         @relation(fields: [milestone_id], references: [id])
   contract   Contract          @relation(fields: [contract_id], references: [id])

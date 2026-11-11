@@ -134,17 +134,17 @@ describe("freelancer routes", () => {
 });
 
 describe("client funding routes", () => {
-  it("creates the PayPal order for the next milestone, captures after approval into holding, and hides it from other clients", async () => {
+  it("creates the PayPal order for the next milestone, places the hold after approval, and hides it from other clients", async () => {
     const f = await makeFreelancer();
     const c = await makeClient({ locale: "en-US", country: "US" });
     const { contract } = await makeContract(f.id, c.id, [{ amount_minor: 12_000, state: "AWAITING_FUNDING" }], { status: "DRAFT", currency: "USD", locale: "en-US" });
     vi.spyOn(paypal, "createOrder").mockResolvedValue({ id: "PP-R1", status: "PAYER_ACTION_REQUIRED", approveUrl: "https://sandbox/approve" });
-    vi.spyOn(paypal, "captureOrder").mockResolvedValue({ paypalOrderId: "PP-R1", captureId: "CAP-R1", status: "COMPLETED", currency: "USD", grossMinor: 12_000, paypalFeeMinor: 449, alreadyCaptured: false });
+    vi.spyOn(paypal, "authorizeOrder").mockResolvedValue({ paypalOrderId: "PP-R1", authorizationId: "AUTH-R1", status: "CREATED", currency: "USD", amountMinor: 12_000, expiresAt: null });
 
     const started = await fundPOST(req("POST", `/api/contracts/${contract.id}/fund`, { cookie: cookie("CLIENT", c.id) }), params(contract.id));
     expect(await started.json()).toMatchObject({ paypal_order_id: "PP-R1", approve_url: "https://sandbox/approve" });
     const captured = await capturePOST(req("POST", "/api/milestone-checkout/capture", { cookie: cookie("CLIENT", c.id), body: { paypal_order_id: "PP-R1" } }), undefined);
-    expect(await captured.json()).toMatchObject({ milestone_state: "FUNDED", payment_status: "COMPLETED" });
+    expect(await captured.json()).toMatchObject({ milestone_state: "FUNDED", payment_status: "AUTHORIZED" });
 
     const mallory = await makeClient();
     expect((await capturePOST(req("POST", "/api/milestone-checkout/capture", { cookie: cookie("CLIENT", mallory.id), body: { paypal_order_id: "PP-R1" } }), undefined)).status).toBe(404);
@@ -158,7 +158,7 @@ describe("client funding routes", () => {
     const { contract } = await makeContract(f.id, c.id, [{ amount_minor: 12_000, state: "AWAITING_FUNDING" }], { status: "DRAFT", currency: "USD", locale: "en-US" });
     vi.spyOn(paypal, "createOrder").mockResolvedValue({ id: "PP-D", status: "PAYER_ACTION_REQUIRED", approveUrl: "u" });
     const { AppError } = await import("@/server/errors");
-    vi.spyOn(paypal, "captureOrder").mockRejectedValue(new AppError("PAYMENT_DECLINED", "declined", { restart: true }));
+    vi.spyOn(paypal, "authorizeOrder").mockRejectedValue(new AppError("PAYMENT_DECLINED", "declined", { restart: true }));
     await fundPOST(req("POST", `/api/contracts/${contract.id}/fund`, { cookie: cookie("CLIENT", c.id) }), params(contract.id));
     const res = await capturePOST(req("POST", "/api/milestone-checkout/capture", { cookie: cookie("CLIENT", c.id), body: { paypal_order_id: "PP-D" } }), undefined);
     expect(res.status).toBe(402);

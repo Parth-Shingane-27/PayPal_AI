@@ -15,6 +15,16 @@ See [ps.md](ps.md) for the problem statement and [architecture.md](architecture.
 - **Everything is audited.** Every tool call, PayPal call, model run and state change writes an `agent_actions` row or a `milestone_events` row. Freelancers see them on `/freelancer/<freelancerId>/activity` and beside every chat.
 - **Briefs, messages and deliverables are data, not instructions.** Text written by a client or a freelancer is passed to the model as quoted data; nothing in it can add a tool, change an amount or switch identity.
 
+### Pay on proof
+
+Funding a milestone places a **PayPal authorization hold**: the client's money is reserved, nothing is charged. Before work starts, the milestone gets **acceptance criteria** (written by either side, or drafted by the Projects assistant with `draft_acceptance_criteria`), and **both sides sign them**; a signed criterion's text can no longer change. After delivery the client marks each criterion passed or failed. Fixed rules in `src/server/domain/criteria.ts` then decide:
+
+- *Accept delivery* needs every criterion **passed**. The worker-free path captures the held payment first; if PayPal refuses (hold expired or voided), nothing is released.
+- If the client does not respond, the **objection window** (`AUTO_RELEASE_DAYS`) closes and the worker captures and releases, but **only if no criterion was marked failed**.
+- A refund of a milestone that is still only held **voids the hold** (nothing was charged).
+
+The model never moves money: criteria, delivery notes and comments are data, and no text in them can change a verdict or an amount. PayPal authorizations are honoured for about three days and valid for up to 29; a hold that has lapsed fails the capture and leaves the milestone unreleased.
+
 ### In holding vs available
 
 A funded milestone is **in holding**: the platform has captured the payment, but the freelancer cannot withdraw it. It stops being in holding when the milestone is `ACCEPTED`. Per freelancer and currency:

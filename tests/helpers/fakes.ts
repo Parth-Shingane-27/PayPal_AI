@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { FxApi } from "@/server/clients/frankfurter";
-import { type CaptureResult, type PayPalApi, PayPalApiError, type PayoutBatchResult, type PayPalOrderStatus, type RefundResult } from "@/server/clients/paypal";
+import { type AuthorizationResult, type CaptureResult, type PayPalApi, PayPalApiError, type PayoutBatchResult, type PayPalOrderStatus, type RefundResult } from "@/server/clients/paypal";
 
 /** Fixed-rate FX: rates[`${from}->${to}`], 1 for the same currency. */
 export function fakeFx(rates: Record<string, number> = {}): FxApi {
@@ -52,6 +52,28 @@ export function fakePayPal(over: Partial<PayPalApi> = {}) {
         shipping: { name: { full_name: "Test Buyer" } },
         alreadyCaptured: false,
       };
+    },
+    async authorizeOrder(ctx, id, requestId): Promise<AuthorizationResult> {
+      log("authorizeOrder", [ctx, id, requestId]);
+      const o = orders.get(id);
+      if (!o) throw new Error(`fake: unknown order ${id}`);
+      o.status = "COMPLETED";
+      return { paypalOrderId: id, authorizationId: `AUTH-${id}`, status: "CREATED", currency: o.currency, amountMinor: o.total, expiresAt: new Date(Date.now() + 29 * 86_400_000) };
+    },
+    async captureAuthorization(ctx, input): Promise<CaptureResult> {
+      log("captureAuthorization", [ctx, input]);
+      return {
+        paypalOrderId: input.paypalOrderId,
+        captureId: `CAP-${input.paypalOrderId}`,
+        status: "COMPLETED",
+        currency: input.currency,
+        grossMinor: input.amountMinor,
+        paypalFeeMinor: Math.round(input.amountMinor * 0.0349) + 49,
+        alreadyCaptured: false,
+      };
+    },
+    async voidAuthorization(ctx, authorizationId, requestId) {
+      log("voidAuthorization", [ctx, authorizationId, requestId]);
     },
     async refundCapture(ctx, input): Promise<RefundResult> {
       log("refundCapture", [ctx, input]);

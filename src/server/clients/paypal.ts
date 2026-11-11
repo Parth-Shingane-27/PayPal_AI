@@ -90,6 +90,13 @@ const captureSchema = z.object({
     .optional(),
 });
 
+const authorizationSchema = z.object({
+  id: z.string(),
+  status: z.enum(["CREATED", "CAPTURED", "DENIED", "PARTIALLY_CAPTURED", "VOIDED", "PENDING"]),
+  amount: moneySchema,
+  expiration_time: z.string().optional(),
+});
+
 const orderSchema = z.object({
   id: z.string(),
   status: z.enum(["CREATED", "SAVED", "APPROVED", "VOIDED", "COMPLETED", "PAYER_ACTION_REQUIRED"]),
@@ -99,7 +106,7 @@ const orderSchema = z.object({
       z.object({
         reference_id: z.string().optional(),
         shipping: z.unknown().optional(),
-        payments: z.object({ captures: z.array(captureSchema).optional() }).optional(),
+        payments: z.object({ captures: z.array(captureSchema).optional(), authorizations: z.array(authorizationSchema).optional() }).optional(),
       }),
     )
     .optional(),
@@ -150,6 +157,8 @@ type CreateOrderInput = {
   locale: string;
   returnUrl: string;
   cancelUrl: string;
+  /** AUTHORIZE places a hold that is captured later; CAPTURE (default) charges at once. */
+  intent?: "CAPTURE" | "AUTHORIZE";
   /** "service": freelance work (no item category, no shipping address). Default "goods". */
   kind?: "goods" | "service";
 };
@@ -168,6 +177,16 @@ export type CaptureResult = {
   shipping?: unknown;
   /** True when PayPal said ORDER_ALREADY_CAPTURED and we read the existing capture. */
   alreadyCaptured: boolean;
+};
+
+export type AuthorizationResult = {
+  paypalOrderId: string;
+  authorizationId: string;
+  status: z.infer<typeof authorizationSchema>["status"];
+  currency: string;
+  amountMinor: number;
+  /** When PayPal stops honouring the hold, if it said. */
+  expiresAt: Date | null;
 };
 
 export type RefundResult = {
@@ -352,7 +371,7 @@ export class PayPalClient {
       throw new Error(`Item total ${itemTotal} does not match order total ${input.totalMinor}`);
     }
     const body = {
-      intent: "CAPTURE",
+      intent: input.intent ?? "CAPTURE",
       purchase_units: [
         {
           reference_id: input.orderId,
@@ -427,6 +446,70 @@ export class PayPalClient {
     const capture = unit?.payments?.captures?.[0];
     if (!capture) throw new Error(`PayPal order ${paypalOrderId} has no capture`);
     return parseCapture(order.id, capture, unit?.shipping, alreadyCaptured);
+  }
+
+  /**
+   * Places the hold on an approved AUTHORIZE order. Nothing is charged: the
+   * money is reserved on the payer's funding source until it is captured or
+   * the authorization is voided or expires.
+   */
+  async authorizeOrder(ctx: CallContext, paypalOrderId: string, requestId: string): Promise<AuthorizationResult> {
+    const path = `/v2/checkout/orders/${encodeURIComponent(paypalOrderId)}/authorize`;
+    let order: z.infer<typeof orderSchema>;
+    try {
+      order = orderSchema.parse(await this.call(ctx, "orders.authorize", "POST", path, { body: {}, requestId }));
+    } catch (err) {
+      if (err instanceof PayPalApiError && err.hasIssue("ORDER_ALREADY_AUTHORIZED")) {
+        order = await this.getOrder(ctx, paypalOrderId);
+      } else if (err instanceof PayPalApiError && err.hasIssue("INSTRUMENT_DECLINED")) {
+        throw new AppError("PAYMENT_DECLINED", "PayPal declined the payment method. Please choose another funding source in PayPal and try again.", {
+          restart: true,
+          issue: "INSTRUMENT_DECLINED",
+        });
+      } else {
+        throw err;
+      }
+    }
+    const auth = order.purchase_units?.[0]?.payments?.authorizations?.[0];
+    if (!auth) throw new Error(`PayPal order ${paypalOrderId} has no authorization`);
+    const currency = auth.amount.currency_code;
+    return {
+      paypalOrderId: order.id,
+      authorizationId: auth.id,
+      status: auth.status,
+      currency,
+      amountMinor: parseDecimal(auth.amount.value, currency),
+      expiresAt: auth.expiration_time ? new Date(auth.expiration_time) : null,
+    };
+  }
+
+  /** Captures the held money (final capture). Fees are known from this response. */
+  async captureAuthorization(
+    ctx: CallContext,
+    input: { authorizationId: string; paypalOrderId: string; amountMinor: number; currency: string; requestId: string; invoiceId?: string },
+  ): Promise<CaptureResult> {
+    const path = `/v2/payments/authorizations/${encodeURIComponent(input.authorizationId)}/capture`;
+    const res = captureSchema.parse(
+      await this.call(ctx, "authorizations.capture", "POST", path, {
+        requestId: input.requestId,
+        body: {
+          amount: { value: toDecimalString(input.amountMinor, input.currency), currency_code: input.currency },
+          final_capture: true,
+          ...(input.invoiceId ? { invoice_id: input.invoiceId } : {}),
+        },
+      }),
+    );
+    return parseCapture(input.paypalOrderId, res, undefined, false);
+  }
+
+  /** Releases a hold without charging anything. */
+  async voidAuthorization(ctx: CallContext, authorizationId: string, requestId: string): Promise<void> {
+    try {
+      await this.call(ctx, "authorizations.void", "POST", `/v2/payments/authorizations/${encodeURIComponent(authorizationId)}/void`, { body: {}, requestId });
+    } catch (err) {
+      if (err instanceof PayPalApiError && (err.hasIssue("AUTHORIZATION_ALREADY_VOIDED") || err.hasIssue("PREVIOUSLY_VOIDED"))) return;
+      throw err;
+    }
   }
 
   // --- Payments v2 ----------------------------------------------------------
@@ -630,5 +713,5 @@ export function payoutBatchId(resource: unknown): string {
 /** The operations services depend on (lets tests substitute a fake). */
 export type PayPalApi = Pick<
   PayPalClient,
-  "createOrder" | "getOrder" | "captureOrder" | "refundCapture" | "createPayout" | "getPayoutBatch" | "verifyWebhookSignature"
+  "createOrder" | "getOrder" | "captureOrder" | "authorizeOrder" | "captureAuthorization" | "voidAuthorization" | "refundCapture" | "createPayout" | "getPayoutBatch" | "verifyWebhookSignature"
 >;

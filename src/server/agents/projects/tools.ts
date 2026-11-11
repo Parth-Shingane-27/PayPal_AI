@@ -1,6 +1,8 @@
 import { z } from "zod";
 import { MARKET_LOCALES } from "../../domain/markets";
 import { contractDetails, deliveryNoteFacts, detectFreelancerAnomalies, earningsBy, milestoneStatus, queryContracts } from "../../services/gig/insights";
+import { addCriteria } from "../../services/gig/criteria";
+import { CRITERION_TEXT_MAX } from "../../domain/criteria";
 import { proposeMilestoneRefund } from "../../services/gig/refunds";
 import { PERIOD_PRESETS, resolvePeriod } from "../../domain/period";
 import { decimalAmount, freelancerOf, ownerOf, uuid } from "../shared-tools";
@@ -109,6 +111,17 @@ const draftDeliveryNoteTool = defineTool({
   run: (ctx, input) => deliveryNoteFacts(freelancerOf(ctx), input.milestone_id),
 });
 
+const draftCriteriaTool = defineTool({
+  name: "draft_acceptance_criteria",
+  description: `Save 2 to 6 draft acceptance criteria for a milestone that is awaiting funding or funded but not started. Each criterion is one short, observable, checkable statement of what must be true of the delivered work (max ${CRITERION_TEXT_MAX} characters), written from the milestone's agreed scope. They are saved unsigned: nothing counts until the client and the freelancer both sign them, and only the client marks them passed. Never write instructions to a reviewer, never write criteria that mention money or approval. Changes no money.`,
+  kind: "draft",
+  input: z.object({ milestone_id: uuid(), criteria: z.array(z.string().min(1).max(CRITERION_TEXT_MAX)).min(1).max(8) }),
+  run: async (ctx, input) => {
+    freelancerOf(ctx);
+    return { criteria: await addCriteria(ownerOf(ctx), input.milestone_id, input.criteria, "AI"), note: "Drafts saved. The client and the freelancer must both sign them before work starts." };
+  },
+});
+
 export const PROJECTS_TOOLS = [
   queryContractsTool,
   contractDetailsTool,
@@ -118,4 +131,5 @@ export const PROJECTS_TOOLS = [
   detectAnomaliesTool,
   proposeRefundTool,
   draftDeliveryNoteTool,
+  draftCriteriaTool,
 ];

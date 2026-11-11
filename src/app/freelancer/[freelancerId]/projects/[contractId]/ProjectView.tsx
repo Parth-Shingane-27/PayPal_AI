@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { api, ApiError, type Money } from "@/components/api";
 import { usePageAssistant } from "@/components/assistant/AssistantContext";
+import { CriteriaPanel } from "@/components/gig/CriteriaPanel";
 import { AutoReleaseCountdown, isHoldingState, MilestoneStamp } from "@/components/gig/MilestoneStamp";
 import { ThreadPanel } from "@/components/gig/ThreadInbox";
 import { dateText, errText, field, h1Cls, h2Cls, Notice, primaryBtn, secondaryBtn, Skeleton } from "@/components/gig/freelancer/shared";
@@ -337,6 +338,9 @@ function MilestoneRow({ m, c, ensureThread, onChanged }: { m: Milestone; c: Cont
       )}
       {m.state === "DELIVERED" && <p className="mt-3 text-sm text-ink-3">{t("fl.proj.waitingClient")}</p>}
       {m.state === "AWAITING_FUNDING" && <p className="mt-3 text-sm text-ink-3">{t("fl.proj.waitingFunding")}</p>}
+      {m.state !== "CANCELLED" && m.state !== "REFUNDED" && m.state !== "ACCEPTED" && (
+        <CriteriaPanel milestoneId={m.milestone_id} role="FREELANCER" state={m.state} hasHold={c.payments.some((p) => p.milestone_id === m.milestone_id && p.status === "AUTHORIZED")} />
+      )}
       {delivering && (
         <DeliverForm
           m={m}

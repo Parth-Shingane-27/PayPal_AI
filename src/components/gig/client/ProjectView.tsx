@@ -9,6 +9,7 @@ import { ConfirmDialog } from "../../ConfirmDialog";
 import { useI18n } from "../../i18n/I18nProvider";
 import { type MilestoneCaptureOutcome, PayPalButtons } from "../../PayPalButtons";
 import { CountryStamp } from "../../ui";
+import { CriteriaPanel } from "../CriteriaPanel";
 import { AutoReleaseCountdown, MilestoneStamp } from "../MilestoneStamp";
 import { ThreadPanel } from "../ThreadInbox";
 import { useGigBase } from "../use-gig-base";
@@ -316,6 +317,9 @@ function MilestoneCard({ m, contract, detail, onDone, onError }: { m: ProjectMil
         </Link>
       )}
 
+      {m.state !== "CANCELLED" && m.state !== "REFUNDED" && m.state !== "ACCEPTED" && (
+        <CriteriaPanel milestoneId={m.milestone_id} role="CLIENT" state={m.state} hasHold={contract.payments.some((p) => p.milestone_id === m.milestone_id && p.status === "AUTHORIZED")} />
+      )}
       <MilestoneActions m={m} contract={contract} onDone={onDone} onError={onError} />
     </li>
   );

@@ -9,7 +9,7 @@ import { money } from "../../domain/money";
  *   paidOut   = amount + fee of PROCESSING / SUCCESS payouts
  *   reserved  = amount + fee of SCHEDULED payouts
  *   available = released - refunded - paidOut - reserved
- *   inHolding = gross of captured, unreleased payments on milestones still in
+ *   inHolding = gross of captured or authorized (held), unreleased payments on milestones still in
  *               holding, less refunds taken from holding. Never available.
  */
 export async function freelancerLedger(freelancerId: string, db: Db = prisma): Promise<BalanceLine[]> {
@@ -33,7 +33,8 @@ export async function freelancerLedger(freelancerId: string, db: Db = prisma): P
       by: ["currency"],
       where: {
         freelancer_id: freelancerId,
-        status: "COMPLETED",
+        // Captured money and money on a PayPal authorization hold both wait here until release.
+        status: { in: ["COMPLETED", "AUTHORIZED"] },
         released_at: null,
         milestone: { state: { in: ["FUNDED", "IN_PROGRESS", "DELIVERED", "REVISION_REQUESTED", "DISPUTED"] } },
       },

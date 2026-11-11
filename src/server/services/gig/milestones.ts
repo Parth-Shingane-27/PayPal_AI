@@ -2,9 +2,12 @@ import type { Milestone, MilestoneState, Prisma, ReleaseKind } from "@/generated
 import { coreConfig } from "../../config";
 import { prisma, type Tx } from "../../db";
 import { netOnRelease } from "../../domain/balances";
+import { canAccept, canAutoRelease, canStart } from "../../domain/criteria";
 import { autoReleaseAt, describeState, type MilestoneEventName, type TransitionActor, transition } from "../../domain/milestones";
 import { money } from "../../domain/money";
 import { AppError, notFound } from "../../errors";
+import type { PayPalApi } from "../../clients/paypal";
+import type { FxApi } from "../../clients/frankfurter";
 import { actorId, type Actor, asJson } from "../audit";
 import { issueInvoice } from "./invoices";
 import { type GigOwner, ownerWhere } from "./owner";
@@ -135,6 +138,21 @@ async function owned(o: GigOwner, milestoneId: string) {
   return m;
 }
 
+/**
+ * Work on a milestone with a payment hold (or any criteria) needs signed
+ * acceptance criteria first. Milestones with no hold and no criteria (older or
+ * seeded data) are not gated.
+ */
+async function assertCriteriaBeforeWork(tx: Tx, milestoneId: string) {
+  const [criteria, held] = await Promise.all([
+    tx.acceptanceCriterion.findMany({ where: { milestone_id: milestoneId } }),
+    tx.milestonePayment.count({ where: { milestone_id: milestoneId, status: "AUTHORIZED" } }),
+  ]);
+  if (criteria.length === 0 && held === 0) return;
+  const ok = canStart(criteria);
+  if (!ok.ok) throw new AppError("CONFLICT", ok.reason ?? "Acceptance criteria must be signed first.");
+}
+
 const actorFor = (o: GigOwner): Actor => (o.type === "FREELANCER" ? { type: "FREELANCER", freelancerId: o.freelancerId } : { type: "CLIENT", clientId: o.clientId });
 
 function cleanNote(note: string | null | undefined, required: string | null = null): string | null {
@@ -148,7 +166,10 @@ function cleanNote(note: string | null | undefined, required: string | null = nu
 
 export async function startMilestone(o: GigOwner, milestoneId: string, now = new Date()) {
   const m = await owned(o, milestoneId);
-  return prisma.$transaction(async (tx) => (await applyTransition(tx, m.id, "START", actorFor(o), { extra: { started_at: now }, now })).milestone);
+  return prisma.$transaction(async (tx) => {
+    await assertCriteriaBeforeWork(tx, m.id);
+    return (await applyTransition(tx, m.id, "START", actorFor(o), { extra: { started_at: now }, now })).milestone;
+  });
 }
 
 /**
@@ -160,11 +181,14 @@ export async function deliverMilestone(o: GigOwner, milestoneId: string, input: 
   const note = cleanNote(input.note);
   const days = coreConfig().AUTO_RELEASE_DAYS;
   return prisma.$transaction(async (tx) => {
+    await assertCriteriaBeforeWork(tx, m.id);
     const applied = await applyTransition(tx, m.id, "DELIVER", actorFor(o), {
       note,
       now,
       extra: { delivered_at: now, auto_release_at: autoReleaseAt(now, days), ...(m.started_at ? {} : { started_at: now }) },
     });
+    // A delivery after a revision is judged again: failed criteria go back to pending.
+    await tx.acceptanceCriterion.updateMany({ where: { milestone_id: m.id, status: "FAILED" }, data: { status: "PENDING", verdict_note: null, decided_at: null } });
     if (input.attachmentIds?.length) {
       const linked = await tx.attachment.updateMany({
         where: { id: { in: input.attachmentIds }, thread: { contract_id: m.contract_id, freelancer_id: m.freelancer_id } },
@@ -178,14 +202,42 @@ export async function deliverMilestone(o: GigOwner, milestoneId: string, input: 
 
 // --- Client actions -------------------------------------------------------------
 
-/** "Accept delivery": the client's click releases the money to the freelancer. */
-export async function acceptDelivery(o: GigOwner, milestoneId: string, now = new Date()) {
+/**
+ * "Accept delivery": the client's click. Every acceptance criterion must be
+ * marked passed. The held payment is captured first; if PayPal refuses, nothing
+ * is released. Only then does the release transaction run.
+ */
+export async function acceptDelivery(o: GigOwner, milestoneId: string, now = new Date(), deps: HoldDeps = {}) {
   const m = await owned(o, milestoneId);
+  const verdict = canAccept(await prisma.acceptanceCriterion.findMany({ where: { milestone_id: m.id } }));
+  if (!verdict.ok) throw new AppError("CONFLICT", verdict.reason ?? "The acceptance criteria are not all passed.");
+  await captureBeforeRelease(m, "ACCEPT", actorFor(o), now, deps);
   return prisma.$transaction(async (tx) => {
     const applied = await applyTransition(tx, m.id, "ACCEPT", actorFor(o), { now });
     const released = await release(tx, applied.milestone, applied.from === "DISPUTED" ? "DISPUTE_RESOLVED" : "CLIENT_ACCEPTED", now);
     return { milestone: await tx.milestone.findUniqueOrThrow({ where: { id: m.id } }), released };
   });
+}
+
+type HoldDeps = { paypal?: PayPalApi; fx?: FxApi };
+
+/**
+ * Captures the held payment once the state machine has agreed the release is
+ * allowed (a dry run of the same transition), so a refused click never moves money.
+ */
+async function captureBeforeRelease(m: Milestone, event: "ACCEPT" | "AUTO_RELEASE", actor: Actor, now: Date, deps: HoldDeps) {
+  const contract = await prisma.contract.findUniqueOrThrow({ where: { id: m.contract_id }, select: { revisions_allowed: true } });
+  const dry = transition(m.state, event, {
+    actor: transitionActor(actor),
+    now,
+    autoReleaseAt: m.auto_release_at,
+    revisionCount: m.revision_count,
+    revisionsAllowed: contract.revisions_allowed,
+  });
+  if (!dry.ok) throw new AppError(dry.code === "FORBIDDEN" ? "FORBIDDEN" : "CONFLICT", dry.reason, { state: m.state, code: dry.code });
+  // Imported here: milestone-payments imports this file for markFunded.
+  const { captureHeldPayment } = await import("./milestone-payments");
+  await captureHeldPayment(m.id, { actor }, deps);
 }
 
 export async function requestRevision(o: GigOwner, milestoneId: string, note: string, now = new Date()) {
@@ -230,15 +282,20 @@ const SYSTEM_ACTOR: Actor = { type: "SYSTEM" };
  * passed. Idempotent: a milestone that is no longer DELIVERED, or not yet due,
  * is left alone and reported as skipped.
  */
-export async function autoReleaseMilestone(milestoneId: string, now = new Date()): Promise<"RELEASED" | "SKIPPED"> {
+export async function autoReleaseMilestone(milestoneId: string, now = new Date(), deps: HoldDeps = {}): Promise<"RELEASED" | "SKIPPED"> {
   try {
+    const m = await prisma.milestone.findUnique({ where: { id: milestoneId } });
+    if (!m) return "SKIPPED";
+    // A failed criterion keeps the payment on hold even after the window closes.
+    if (!canAutoRelease(await prisma.acceptanceCriterion.findMany({ where: { milestone_id: m.id } })).ok) return "SKIPPED";
+    await captureBeforeRelease(m, "AUTO_RELEASE", SYSTEM_ACTOR, now, deps);
     return await prisma.$transaction(async (tx) => {
-      const applied = await applyTransition(tx, milestoneId, "AUTO_RELEASE", SYSTEM_ACTOR, { now, note: `No response within ${coreConfig().AUTO_RELEASE_DAYS} days of delivery.` });
+      const applied = await applyTransition(tx, milestoneId, "AUTO_RELEASE", SYSTEM_ACTOR, { now, note: `No objection within ${coreConfig().AUTO_RELEASE_DAYS} days of delivery.` });
       await release(tx, applied.milestone, "AUTO_RELEASED", now);
       return "RELEASED" as const;
     });
   } catch (err) {
-    if (err instanceof AppError && (err.code === "CONFLICT" || err.code === "NOT_FOUND")) return "SKIPPED";
+    if (err instanceof AppError && (err.code === "CONFLICT" || err.code === "NOT_FOUND" || err.code === "UPSTREAM_ERROR")) return "SKIPPED";
     throw err;
   }
 }
@@ -254,11 +311,11 @@ export function milestonesDueForAutoRelease(now = new Date(), limit = 200) {
 }
 
 /** One sweep of the auto-release job. Safe to run concurrently and repeatedly. */
-export async function sweepAutoReleases(now = new Date()): Promise<{ released: number; skipped: number }> {
+export async function sweepAutoReleases(now = new Date(), deps: HoldDeps = {}): Promise<{ released: number; skipped: number }> {
   let released = 0;
   let skipped = 0;
   for (const { id } of await milestonesDueForAutoRelease(now)) {
-    if ((await autoReleaseMilestone(id, now)) === "RELEASED") released++;
+    if ((await autoReleaseMilestone(id, now, deps)) === "RELEASED") released++;
     else skipped++;
   }
   return { released, skipped };

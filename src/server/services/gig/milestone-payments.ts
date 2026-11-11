@@ -96,6 +96,8 @@ export async function startMilestoneFunding(o: GigOwner, contractId: string, aud
         returnUrl: `${cfg.APP_URL}${clientPath(o.clientId, "checkout/return")}?milestone=${next.id}`,
         cancelUrl: `${cfg.APP_URL}${clientPath(o.clientId, `projects/${contract.id}`)}?cancelled=${next.id}`,
         kind: "service",
+        // Pay on proof: the money is only held until the acceptance criteria are met.
+        intent: "AUTHORIZE",
       });
       await tx.milestonePayment.create({
         data: {
@@ -180,14 +182,14 @@ export async function applyMilestoneCapture(paymentId: string, cap: CaptureResul
     await prisma.$transaction(async (tx) => {
       const now = new Date();
       const moved = await tx.milestonePayment.updateMany({
-        where: { id: payment.id, status: { in: ["CREATED", "PENDING"] } },
+        where: { id: payment.id, status: { in: ["CREATED", "PENDING", "AUTHORIZED"] } },
         data: { status: "COMPLETED", capture_id: cap.captureId, captured_at: now, failure_reason: null, ...s },
       });
       if (moved.count === 1) await markFunded(tx, payment.milestone_id, now);
     });
   } else if (cap.status === "PENDING") {
     await prisma.milestonePayment.updateMany({
-      where: { id: payment.id, status: "CREATED" },
+      where: { id: payment.id, status: { in: ["CREATED", "AUTHORIZED"] } },
       data: { status: "PENDING", capture_id: cap.captureId, failure_reason: cap.statusReason ?? null },
     });
   } else {
@@ -212,16 +214,69 @@ async function fundingOutcome(paymentId: string, alreadyCaptured: boolean): Prom
   };
 }
 
-/** The capture route, after the client approved in PayPal. Idempotent. */
-export async function captureMilestoneFunding(o: GigOwner, paypalOrderId: string, audit: AuditCtx, deps: Deps = {}): Promise<FundingOutcome> {
+/**
+ * The funding route, after the client approved in PayPal: places the hold.
+ * The money is reserved, not charged; it is captured only when the milestone
+ * is accepted (see captureHeldPayment). Idempotent.
+ */
+export async function authorizeMilestoneFunding(o: GigOwner, paypalOrderId: string, audit: AuditCtx, deps: Deps = {}): Promise<FundingOutcome> {
   if (o.type !== "CLIENT") throw new AppError("FORBIDDEN", "Only the client funds milestones.");
   const pp = deps.paypal ?? defaultPaypal;
   const payment = await prisma.milestonePayment.findFirst({ where: { paypal_order_id: paypalOrderId, client_id: o.clientId } });
   if (!payment) throw notFound("Payment");
-  if (payment.status === "COMPLETED" || (payment.status === "PENDING" && payment.capture_id)) return fundingOutcome(payment.id, true);
+  if (payment.status === "AUTHORIZED" || payment.status === "COMPLETED" || (payment.status === "PENDING" && payment.capture_id)) return fundingOutcome(payment.id, true);
   if (payment.status !== "CREATED") {
-    throw new AppError("CONFLICT", `This payment is ${payment.status.toLowerCase()} and cannot be captured. Start the milestone payment again.`, { restart: true });
+    throw new AppError("CONFLICT", `This payment is ${payment.status.toLowerCase()} and cannot be held. Start the milestone payment again.`, { restart: true });
   }
-  const cap = await pp.captureOrder(gigCallContext(audit, payment.freelancer_id), paypalOrderId, `capture-${payment.id}`);
-  return applyMilestoneCapture(payment.id, cap, deps.fx ?? frankfurter);
+  const auth = await pp.authorizeOrder(gigCallContext(audit, payment.freelancer_id), paypalOrderId, `authorize-${payment.id}`);
+  if (auth.currency !== payment.currency || auth.amountMinor !== payment.gross_minor) {
+    throw new Error(`Authorization ${auth.authorizationId} is ${auth.amountMinor} ${auth.currency}, milestone payment ${payment.id} expects ${payment.gross_minor} ${payment.currency}`);
+  }
+  if (auth.status === "CREATED" || auth.status === "PENDING") {
+    await prisma.$transaction(async (tx) => {
+      const now = new Date();
+      const moved = await tx.milestonePayment.updateMany({
+        where: { id: payment.id, status: "CREATED" },
+        data: { status: "AUTHORIZED", authorization_id: auth.authorizationId, authorized_at: now, authorization_expires_at: auth.expiresAt, failure_reason: null },
+      });
+      if (moved.count === 1) await markFunded(tx, payment.milestone_id, now);
+    });
+  } else {
+    await prisma.milestonePayment.updateMany({
+      where: { id: payment.id, status: "CREATED" },
+      data: { status: auth.status === "DENIED" ? "DECLINED" : "FAILED", failure_reason: `Authorization ${auth.status}` },
+    });
+  }
+  return fundingOutcome(payment.id, false);
+}
+
+/**
+ * Captures the held money for a milestone that is being released. Runs before
+ * the release transaction: if PayPal refuses (hold expired or voided, funds
+ * gone), nothing is released. Does nothing when there is no hold (already
+ * captured, or a legacy payment). Idempotent through the PayPal request id.
+ */
+export async function captureHeldPayment(milestoneId: string, audit: AuditCtx, deps: Deps = {}): Promise<"CAPTURED" | "NOTHING_HELD"> {
+  const pp = deps.paypal ?? defaultPaypal;
+  const payment = await prisma.milestonePayment.findFirst({ where: { milestone_id: milestoneId, status: "AUTHORIZED" } });
+  if (!payment || !payment.authorization_id) return "NOTHING_HELD";
+  let cap: CaptureResult;
+  try {
+    cap = await pp.captureAuthorization(gigCallContext(audit, payment.freelancer_id), {
+      authorizationId: payment.authorization_id,
+      paypalOrderId: payment.paypal_order_id,
+      amountMinor: payment.gross_minor,
+      currency: payment.currency,
+      requestId: `capture-${payment.id}`,
+      invoiceId: payment.paypal_invoice_id,
+    });
+  } catch (err) {
+    const message = err instanceof PayPalApiError || err instanceof AppError ? err.message : "PayPal could not capture the held payment.";
+    throw new AppError("UPSTREAM_ERROR", `The held payment could not be captured, so nothing was released: ${message}`);
+  }
+  const outcome = await applyMilestoneCapture(payment.id, cap, deps.fx ?? frankfurter);
+  if (outcome.payment_status !== "COMPLETED") {
+    throw new AppError("CONFLICT", "PayPal is still processing the capture. Try releasing again in a moment.");
+  }
+  return "CAPTURED";
 }
