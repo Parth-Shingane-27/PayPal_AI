@@ -7,18 +7,18 @@ import { formatCount } from "@/lib/format";
 import type { MessageKey } from "@/lib/i18n/messages";
 import { getT } from "@/lib/i18n/server";
 import { listMarkets } from "@/server/domain/markets";
-import { marketplaceStats } from "@/server/services/analytics";
+import { gigMarketplaceStats } from "@/server/services/gig/dashboards";
 
 export const dynamic = "force-dynamic";
 
 const DESCRIPTION =
-  "GlobalCart lets small makers list a product once and sell it in 11 markets. AI translates and prices each listing, buyers pay in their own currency through PayPal, and you see exactly what every sale costs.";
+  "GlobalGig lets freelancers sell their services to clients in 11 markets. AI writes each service page in the client's language and sets rates per market, clients pay each milestone in their own currency through PayPal, and the money is held until they accept the work.";
 
 export const metadata: Metadata = {
-  title: { absolute: "GlobalCart: sell your craft in ten countries from one listing" },
+  title: { absolute: "GlobalGig: freelance for clients in eleven countries, paid safely by milestone" },
   description: DESCRIPTION,
   alternates: { canonical: "/" },
-  openGraph: { title: "GlobalCart: sell your craft in ten countries from one listing", description: DESCRIPTION, url: "/" },
+  openGraph: { title: "GlobalGig: freelance for clients in eleven countries, paid safely by milestone", description: DESCRIPTION, url: "/" },
 };
 
 const STEP_KEYS = [
@@ -35,7 +35,7 @@ const FAQ_KEYS = [
 ] as const;
 
 export default async function Home() {
-  const s = await marketplaceStats();
+  const s = await gigMarketplaceStats();
   const t = await getT();
   const STEPS = STEP_KEYS.map(([a, b]) => ({ title: t(a), body: t(b) }));
   const FAQ = FAQ_KEYS.map(([a, b]) => ({ q: t(a), a: t(b) }));
@@ -46,25 +46,24 @@ export default async function Home() {
     {
       "@context": "https://schema.org",
       "@type": "Organization",
-      name: "GlobalCart",
+      name: "GlobalGig",
       url: base,
       logo: `${base}/icon.svg`,
       description: DESCRIPTION,
     },
-    { "@context": "https://schema.org", "@type": "WebSite", name: "GlobalCart", url: base, inLanguage: "en" },
+    { "@context": "https://schema.org", "@type": "WebSite", name: "GlobalGig", url: base, inLanguage: "en" },
     {
       "@context": "https://schema.org",
       "@type": "ItemList",
-      name: "Featured pieces from GlobalCart makers",
+      name: "Featured services from GlobalGig freelancers",
       itemListElement: s.featured.map((f, i) => ({
         "@type": "ListItem",
         position: i + 1,
         item: {
-          "@type": "Product",
+          "@type": "Service",
           name: f.title,
-          image: f.image_url ? `${base}${f.image_url}` : undefined,
-          brand: { "@type": "Brand", name: f.maker },
-          offers: { "@type": "Offer", price: (f.price.amount_minor / 100).toFixed(2), priceCurrency: f.price.currency, availability: "https://schema.org/InStock" },
+          provider: { "@type": "Person", name: f.freelancer },
+          offers: { "@type": "Offer", price: (f.from_price.amount_minor / 100).toFixed(2), priceCurrency: f.from_price.currency },
         },
       })),
     },
@@ -82,13 +81,13 @@ export default async function Home() {
       <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd).replace(/</g, "\\u003c") }} />
       <header className="sticky top-0 z-30 border-b border-rule bg-paper/90 backdrop-blur">
         <nav aria-label="Main" className="mx-auto flex max-w-6xl items-center gap-2 px-4 py-3 md:px-6">
-          <Link href="/" className="mr-auto flex items-center gap-2.5 rounded-md" aria-label="GlobalCart home">
+          <Link href="/" className="mr-auto flex items-center gap-2.5 rounded-md" aria-label="GlobalGig home">
             <svg viewBox="0 0 32 32" className="h-8 w-8 shrink-0" aria-hidden>
         <circle cx="16" cy="16" r="15" fill="#c99a2e" />
         <circle cx="16" cy="16" r="11" fill="none" stroke="#1a1514" strokeOpacity="0.55" strokeWidth="1.2" strokeDasharray="2 2.2" />
         <path d="M9 16h14M16 9c2.4 2 3.5 4.3 3.5 7s-1.1 5-3.5 7c-2.4-2-3.5-4.3-3.5-7s1.1-5 3.5-7z" fill="none" stroke="#1a1514" strokeWidth="1.8" />
       </svg>
-            <span className="font-display text-xl font-bold tracking-[-0.02em]">GlobalCart</span>
+            <span className="font-display text-xl font-bold tracking-[-0.02em]">GlobalGig</span>
           </Link>
           <a href="#how" className={`${navLink} hidden sm:inline-flex`}>
             {t("land.how")}
@@ -111,7 +110,7 @@ export default async function Home() {
           <div>
             <p className="mb-4 inline-flex items-center gap-2 text-sm font-medium text-accent">
               <span className="h-2 w-2 rounded-full bg-accent" aria-hidden />
-              {t("land.badge", { makers: s.makers, markets: s.markets })}
+              {t("land.badge", { makers: s.freelancers, markets: s.markets })}
             </p>
             <h1 id="hero-title" className="font-display text-[2.6rem] leading-[1.02] font-bold tracking-[-0.035em] text-ink sm:text-[3.4rem] lg:text-[4.1rem]">
               {t("land.h1")}
@@ -126,7 +125,7 @@ export default async function Home() {
               </a>
             </div>
           </div>
-          <SaleWaybill bps={s.anatomy_bps} orders={s.orders_90d} makers={s.makers} />
+          <SaleWaybill bps={s.anatomy_bps} orders={s.milestones_90d} makers={s.freelancers} />
         </section>
 
         <section id="how" aria-labelledby="how-title" className="border-y border-rule bg-sheet">
@@ -176,25 +175,18 @@ export default async function Home() {
         <section id="makers" aria-labelledby="makers-title" className="border-y border-rule bg-sheet">
           <div className="mx-auto max-w-6xl px-4 py-16 md:px-6">
             <h2 id="makers-title" className="font-display text-3xl font-bold tracking-[-0.025em] md:text-4xl">
-              {t("land.makersTitle", { n: s.makers, c: new Set(s.featured.map((f) => f.country)).size })}
+              {t("land.makersTitle", { n: s.freelancers, c: new Set(s.featured.map((f) => f.country)).size })}
             </h2>
             <ul className="mt-10 grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-5">
               {s.featured.map((f) => (
-                <li key={f.listing_id} className="group flex flex-col overflow-hidden rounded-[10px] border border-rule bg-paper transition-colors hover:border-accent">
-                  <div className="overflow-hidden">
-                    {f.image_url && (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img src={f.image_url} alt={f.title} width={240} height={240} loading="lazy" className="aspect-square w-full transition-transform duration-300 group-hover:scale-[1.03]" />
-                    )}
-                  </div>
-                  <div className="flex flex-1 flex-col gap-1 p-3">
-                    <h3 className="text-sm leading-snug font-semibold">{f.title}</h3>
-                    <p className="flex items-center gap-1.5 text-xs text-ink-3">
-                      <CountryStamp country={f.country} />
-                      <span className="truncate">{f.maker}</span>
-                    </p>
-                    <p className="num mt-auto pt-2 font-display font-semibold">{f.price.display}</p>
-                  </div>
+                <li key={f.page_id} className="group flex flex-col gap-2 rounded-[10px] border border-rule bg-paper p-4 transition-colors hover:border-accent">
+                  <p className="flex items-center gap-1.5 text-xs text-ink-3">
+                    <CountryStamp country={f.country} />
+                    <span className="truncate font-medium text-ink-2">{f.freelancer}</span>
+                  </p>
+                  <h3 className="text-sm leading-snug font-semibold">{f.title}</h3>
+                  <p className="text-xs text-ink-3">{f.category}</p>
+                  <p className="num mt-auto pt-2 font-display font-semibold">{t("land.from", { price: f.from_price.display })}</p>
                 </li>
               ))}
             </ul>
@@ -207,8 +199,8 @@ export default async function Home() {
           </h2>
           <dl className="mt-8 grid gap-px overflow-hidden rounded-[10px] border border-rule bg-rule sm:grid-cols-2 lg:grid-cols-4">
             {[
-              [t("land.n1"), formatCount(s.orders_90d)],
-              [t("land.n2"), s.sales_90d.display],
+              [t("land.n1"), formatCount(s.milestones_90d)],
+              [t("land.n2"), s.released_90d.display],
               [t("land.n3"), `${(s.anatomy_bps.net / 100).toFixed(1)}%`],
               [t("land.n4"), t("land.n4v", { n: s.markets })],
             ].map(([label, value]) => (

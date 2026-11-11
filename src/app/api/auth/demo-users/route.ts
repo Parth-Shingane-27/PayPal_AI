@@ -6,9 +6,9 @@ import { handler, json } from "@/server/http";
 /** Seeded accounts for the demo login screen. */
 export const GET = handler(async () => {
   if (!demoLoginEnabled()) throw new AppError("FORBIDDEN", "Demo login is disabled.");
-  const [sellers, buyers] = await Promise.all([
-    prisma.seller.findMany({ select: { id: true, name: true, country: true, currency: true, locale: true }, orderBy: { name: "asc" } }),
-    prisma.buyer.findMany({ select: { id: true, name: true, country: true, locale: true }, orderBy: { name: "asc" } }),
+  const [freelancers, clients] = await Promise.all([
+    prisma.freelancer.findMany({ select: { id: true, name: true, country: true, currency: true, locale: true, headline: true }, orderBy: { name: "asc" } }),
+    prisma.client.findMany({ select: { id: true, name: true, company_name: true, country: true, locale: true }, orderBy: { name: "asc" } }),
   ]);
-  return json({ sellers, buyers });
+  return json({ freelancers, clients });
 });

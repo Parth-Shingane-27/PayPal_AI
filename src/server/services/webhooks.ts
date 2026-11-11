@@ -6,12 +6,15 @@ import {
   payoutBatchId,
   refundFromResource,
 } from "../clients/paypal";
-import { paypalWebhookId } from "../config";
+import { paypalWebhookId, proactiveEnabled } from "../config";
 import { prisma } from "../db";
+import { enqueueWatch } from "../queue";
 import { asJson, paypal as defaultPaypal, SYSTEM, toCallContext } from "./audit";
-import { applyCapture } from "./checkout";
-import { applyBatchResult } from "./payouts";
-import { syncOrderRefundStatus } from "./refunds";
+import { refundSplit } from "../domain/balances";
+import { isReleased } from "../domain/milestones";
+import { applyMilestoneCapture } from "./gig/milestone-payments";
+import { afterRefundCompleted } from "./gig/milestones";
+import { applyFreelancerBatchResult } from "./gig/payouts";
 
 /**
  * PayPal webhooks. The worker's HTTP route verifies the signature with PayPal,
@@ -57,71 +60,79 @@ export async function storeWebhookEvent(event: WebhookEventBody): Promise<boolea
   return created.count === 1;
 }
 
-type Outcome = { status: "PROCESSED" | "IGNORED"; note?: string };
+type Outcome = { status: "PROCESSED" | "IGNORED"; note?: string; freelancerId?: string };
 
 async function handleCapture(resource: unknown): Promise<Outcome> {
   const cap = captureFromResource(resource);
-  const payment = await prisma.payment.findFirst({
+  const payment = await prisma.milestonePayment.findFirst({
     where: { OR: [{ capture_id: cap.captureId }, ...(cap.paypalOrderId ? [{ paypal_order_id: cap.paypalOrderId }] : [])] },
   });
   if (!payment) return { status: "IGNORED", note: `No payment for capture ${cap.captureId}` };
-  await applyCapture(payment.id, { ...cap, paypalOrderId: payment.paypal_order_id });
-  return { status: "PROCESSED" };
+  await applyMilestoneCapture(payment.id, { ...cap, paypalOrderId: payment.paypal_order_id });
+  return { status: "PROCESSED", freelancerId: payment.freelancer_id };
 }
 
-async function handleRefund(resource: unknown, reversed: boolean): Promise<Outcome> {
-  const r = refundFromResource(resource);
-  const known = await prisma.refund.findUnique({ where: { paypal_refund_id: r.refundId } });
+/** Milestone refunds: settle a pending one, or record one made outside GlobalGig. */
+async function handleMilestoneRefund(r: ReturnType<typeof refundFromResource>, reversed: boolean): Promise<Outcome> {
+  const known = await prisma.milestoneRefund.findUnique({ where: { paypal_refund_id: r.refundId } });
   if (known) {
     if (known.status === "PENDING" && r.status === "COMPLETED") {
       await prisma.$transaction(async (tx) => {
-        await tx.refund.update({ where: { id: known.id }, data: { status: "COMPLETED", completed_at: new Date() } });
-        await syncOrderRefundStatus(tx, known.order_id);
+        await tx.milestoneRefund.update({ where: { id: known.id }, data: { status: "COMPLETED", completed_at: new Date() } });
+        await afterRefundCompleted(tx, known.id);
       });
     } else if (known.status === "PENDING" && (r.status === "FAILED" || r.status === "CANCELLED")) {
-      await prisma.$transaction(async (tx) => {
-        await tx.refund.update({ where: { id: known.id }, data: { status: "FAILED", error: `PayPal refund ${r.status}` } });
-        await syncOrderRefundStatus(tx, known.order_id);
-      });
+      await prisma.milestoneRefund.update({ where: { id: known.id }, data: { status: "FAILED", error: `PayPal refund ${r.status}` } });
     }
-    return { status: "PROCESSED" };
+    return { status: "PROCESSED", freelancerId: known.freelancer_id };
   }
-
-  // A refund or reversal made outside GlobalCart: record it so the ledger is right.
   if (!r.captureId) return { status: "IGNORED", note: `Refund ${r.refundId} has no capture link` };
-  const payment = await prisma.payment.findUnique({ where: { capture_id: r.captureId } });
+  const payment = await prisma.milestonePayment.findUnique({ where: { capture_id: r.captureId }, include: { milestone: true } });
   if (!payment) return { status: "IGNORED", note: `No payment for capture ${r.captureId}` };
   if (r.status !== "COMPLETED" && r.status !== "PENDING") return { status: "IGNORED", note: `Refund status ${r.status}` };
+  const fromHolding = !isReleased(payment.milestone.state) && payment.released_at === null;
+  const split = refundSplit({
+    amountMinor: r.amountMinor,
+    grossMinor: payment.gross_minor,
+    platformFeeMinor: payment.platform_fee_minor ?? 0,
+    paypalFeeReturnedMinor: r.paypalFeeReturnedMinor,
+    fromHolding,
+  });
   const status = r.status;
-  const platformReturned = Math.round(((payment.platform_fee_minor ?? 0) * r.amountMinor) / payment.gross_minor);
   await prisma.$transaction(async (tx) => {
-    await tx.refund.create({
+    const created = await tx.milestoneRefund.create({
       data: {
         payment_id: payment.id,
-        order_id: payment.order_id,
-        seller_id: payment.seller_id,
+        milestone_id: payment.milestone_id,
+        contract_id: payment.contract_id,
+        freelancer_id: payment.freelancer_id,
         currency: r.currency,
         amount_minor: r.amountMinor,
-        reason: reversed ? "Payment reversed by PayPal (chargeback or dispute)." : "Refunded directly in PayPal, outside GlobalCart.",
+        reason: reversed ? "Payment reversed by PayPal (chargeback or dispute)." : "Refunded directly in PayPal, outside GlobalGig.",
+        from_holding: fromHolding,
         status,
         paypal_refund_id: r.refundId,
         paypal_fee_returned_minor: r.paypalFeeReturnedMinor,
-        platform_fee_returned_minor: platformReturned,
-        seller_debit_minor: r.amountMinor - r.paypalFeeReturnedMinor - platformReturned,
+        platform_fee_returned_minor: split.platformFeeReturnedMinor,
+        freelancer_debit_minor: split.freelancerDebitMinor,
         completed_at: status === "COMPLETED" ? new Date() : null,
       },
     });
-    await syncOrderRefundStatus(tx, payment.order_id);
+    if (status === "COMPLETED") await afterRefundCompleted(tx, created.id);
   });
-  return { status: "PROCESSED" };
+  return { status: "PROCESSED", freelancerId: payment.freelancer_id };
+}
+
+async function handleRefund(resource: unknown, reversed: boolean): Promise<Outcome> {
+  return handleMilestoneRefund(refundFromResource(resource), reversed);
 }
 
 async function handlePayoutBatch(resource: unknown): Promise<Outcome> {
   const batchId = payoutBatchId(resource);
-  const payout = await prisma.payout.findUnique({ where: { paypal_batch_id: batchId } });
-  if (!payout) return { status: "IGNORED", note: `No payout for batch ${batchId}` };
-  await applyBatchResult(payout.id, payoutBatchFromResource(resource, payout.currency));
-  return { status: "PROCESSED" };
+  const fp = await prisma.freelancerPayout.findUnique({ where: { paypal_batch_id: batchId } });
+  if (!fp) return { status: "IGNORED", note: `No payout for batch ${batchId}` };
+  await applyFreelancerBatchResult(fp.id, payoutBatchFromResource(resource, fp.currency));
+  return { status: "PROCESSED", freelancerId: fp.freelancer_id };
 }
 
 /** Processes one stored event. Errors are recorded and rethrown so the job retries. */
@@ -130,16 +141,21 @@ export async function processWebhookEvent(eventId: string): Promise<Outcome | { 
   if (!event || event.status === "PROCESSED" || event.status === "IGNORED") return { status: "SKIPPED" };
   const resource = (event.payload as { resource?: unknown }).resource;
   try {
-    let outcome: Outcome;
+    let handled: Outcome;
     const t = event.event_type;
-    if (t === "PAYMENT.CAPTURE.REFUNDED" || t === "PAYMENT.CAPTURE.REVERSED") outcome = await handleRefund(resource, t.endsWith("REVERSED"));
-    else if (t.startsWith("PAYMENT.CAPTURE.")) outcome = await handleCapture(resource);
-    else if (t.startsWith("PAYMENT.PAYOUTSBATCH.")) outcome = await handlePayoutBatch(resource);
-    else outcome = { status: "IGNORED", note: `Unhandled event type ${t}` };
+    if (t === "PAYMENT.CAPTURE.REFUNDED" || t === "PAYMENT.CAPTURE.REVERSED") handled = await handleRefund(resource, t.endsWith("REVERSED"));
+    else if (t.startsWith("PAYMENT.CAPTURE.")) handled = await handleCapture(resource);
+    else if (t.startsWith("PAYMENT.PAYOUTSBATCH.")) handled = await handlePayoutBatch(resource);
+    else handled = { status: "IGNORED", note: `Unhandled event type ${t}` };
+    const { freelancerId, ...outcome } = handled;
     await prisma.webhookEvent.update({
       where: { id: event.id },
       data: { status: outcome.status, error: outcome.note ?? null, processed_at: new Date() },
     });
+    // Proactive agents: look again at this freelancer soon. Never fail the webhook over it.
+    if (outcome.status === "PROCESSED" && freelancerId && proactiveEnabled()) {
+      await enqueueWatch(freelancerId).catch((e: unknown) => console.error("[proactive] could not queue a check", e));
+    }
     return outcome;
   } catch (err) {
     await prisma.webhookEvent.update({

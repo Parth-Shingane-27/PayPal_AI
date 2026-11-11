@@ -18,7 +18,8 @@ export function transcriptOf(history: ChatMessage[]): TranscriptEntry[] {
   for (const m of history) {
     if (m.role === "user") {
       const text = textOf(m.content);
-      if (text.trim() && !text.startsWith("<session_context>")) out.push({ role: "user", text });
+      // The automatic-check prompt is written by GlobalGig, not the freelancer; the finding itself is the first thing shown.
+      if (text.trim() && !text.startsWith("<session_context>") && !text.startsWith("[automatic check]")) out.push({ role: "user", text });
     } else if (m.role === "assistant") {
       for (const call of m.tool_calls ?? []) out.push({ role: "tool", name: call.function.name, id: call.id });
       const text = textOf(m.content ?? null).trim();

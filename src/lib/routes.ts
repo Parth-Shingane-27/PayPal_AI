@@ -9,5 +9,5 @@ export const isUuid = (s: string | undefined | null): s is string => typeof s ==
 
 const join = (base: string, sub: string) => (sub ? `${base}/${sub.replace(/^\/+/, "")}` : base);
 
-export const sellerPath = (sellerId: string, sub = "") => join(`/seller/${sellerId}`, sub);
-export const buyerPath = (buyerId: string, sub = "") => join(`/buyer/${buyerId}`, sub);
+export const freelancerPath = (freelancerId: string, sub = "") => join(`/freelancer/${freelancerId}`, sub);
+export const clientPath = (clientId: string, sub = "") => join(`/client/${clientId}`, sub);

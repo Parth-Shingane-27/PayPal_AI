@@ -33,25 +33,27 @@ function loadSdk(clientId: string, currency: string): Promise<PayPalNamespace> {
   return p;
 }
 
-export type CaptureOutcome = { order_id: string; order_status: string; payment_status: string; total: { display: string }; delivery?: { display: string } };
+/** A milestone funding capture: the money is now in holding until the client accepts the delivery. */
+export type MilestoneCaptureOutcome = { contract_id: string; milestone_id: string; milestone_state: string; payment_status: string; amount: { display: string }; already_captured: boolean };
 
 /**
- * PayPal checkout. createOrder reuses the PayPal order the Shopping Agent
- * created, or asks the server to start checkout for the cart. onApprove calls
- * the capture route: the buyer's click in PayPal is the approval.
+ * PayPal checkout. createOrder reuses the PayPal order an agent created, or
+ * asks the server to start one for the next unfunded milestone of the
+ * contract. onApprove calls
+ * the capture route: the payer's click in PayPal is the approval.
  */
 export function PayPalButtons(props: {
   clientId: string | null;
   currency: string;
-  cartId: string;
+  contractId: string;
   paypalOrderId?: string;
   approveUrl?: string;
-  onPaid: (o: CaptureOutcome) => void;
+  onPaid: (o: MilestoneCaptureOutcome) => void;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [fallbackUrl, setFallbackUrl] = useState<string | undefined>(props.approveUrl);
-  const { clientId, currency, cartId, paypalOrderId, onPaid } = props;
+  const { clientId, currency, contractId, paypalOrderId, onPaid } = props;
 
   useEffect(() => {
     if (!clientId || !ref.current) return;
@@ -64,13 +66,13 @@ export function PayPalButtons(props: {
         const buttons = paypal.Buttons({
           createOrder: async () => {
             if (paypalOrderId) return paypalOrderId;
-            const res = await api<{ paypal_order_id: string; approve_url: string }>("/api/checkout", { body: { cart_id: cartId } });
+            const res = await api<{ paypal_order_id: string; approve_url: string }>(`/api/contracts/${contractId}/fund`, { method: "POST" });
             setFallbackUrl(res.approve_url);
             return res.paypal_order_id;
           },
           onApprove: async (data, actions) => {
             try {
-              onPaid(await api<CaptureOutcome>("/api/checkout/capture", { body: { paypal_order_id: data.orderID } }));
+              onPaid(await api<MilestoneCaptureOutcome>("/api/milestone-checkout/capture", { body: { paypal_order_id: data.orderID } }));
             } catch (err) {
               if (err instanceof ApiError && err.code === "PAYMENT_DECLINED" && err.details?.restart) {
                 setMessage(err.message);
@@ -90,7 +92,7 @@ export function PayPalButtons(props: {
       closed = true;
       void instance?.close();
     };
-  }, [clientId, currency, cartId, paypalOrderId, onPaid]);
+  }, [clientId, currency, contractId, paypalOrderId, onPaid]);
 
   return (
     <div className="space-y-2">

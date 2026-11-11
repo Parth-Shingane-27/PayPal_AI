@@ -6,11 +6,11 @@ import { AppError } from "../errors";
  * strings. Floats are never stored.
  */
 
-/** Every currency a market, a seller or a product cost can use. */
-export const SUPPORTED_CURRENCIES = ["USD", "GBP", "CAD", "AUD", "EUR", "MXN", "JPY"] as const;
+/** Every currency a market, a freelancer's home currency or a base price can use. */
+export const SUPPORTED_CURRENCIES = ["USD", "GBP", "CAD", "AUD", "EUR", "MXN", "JPY", "BRL", "PHP"] as const;
 export type Currency = (typeof SUPPORTED_CURRENCIES)[number];
 
-const EXPONENTS: Record<Currency, number> = { USD: 2, GBP: 2, CAD: 2, AUD: 2, EUR: 2, MXN: 2, JPY: 0 };
+const EXPONENTS: Record<Currency, number> = { USD: 2, GBP: 2, CAD: 2, AUD: 2, EUR: 2, MXN: 2, JPY: 0, BRL: 2, PHP: 2 };
 
 export function isSupportedCurrency(currency: string): currency is Currency {
   return (SUPPORTED_CURRENCIES as readonly string[]).includes(currency);

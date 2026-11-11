@@ -1,14 +1,35 @@
 import { describe, expect, it } from "vitest";
-import { compareMoney, formatAge, formatBps, formatChange, moneyCsv } from "@/lib/format";
+import { compareMoney, formatAge, formatBps, formatChange, moneyCsv, shortId } from "@/lib/format";
 import { parseGridState, serializeGridState } from "@/lib/grid-state";
-import { allocateByWeight, changeBps, lastMonthKeys, ratioBps, weekIndex } from "@/server/domain/analytics";
-import { ART_MOTIFS, productArtSvg } from "@/server/domain/product-art";
+import { allocateByWeight, changeBps, lastMonthKeys, monthProgress, ratioBps, weekIndex } from "@/server/domain/analytics";
 import { convertAtReference, referenceRate } from "@/server/domain/reference-rates";
-import { CATALOGUE, BUYER_MARKETS, langOf } from "../../prisma/seed/catalogue";
+import { CLIENTS, FREELANCERS, LANGS, langOf } from "../../prisma/seed/people";
 import { createRng } from "../../prisma/seed/prng";
-import { SCRIPTS } from "../../prisma/seed/scripts";
+import { BRIEFS, SCRIPTS } from "../../prisma/seed/scripts";
+import { SERVICES } from "../../prisma/seed/services";
 import { isMarketLocale } from "@/server/domain/markets";
-import { SEO_TITLE_MAX } from "@/server/services/catalog";
+import { SEO_TITLE_MAX } from "@/server/services/gig/catalog";
+
+describe("shortId", () => {
+  it("uses the random tail, because UUIDv7 ids created together share their first characters", () => {
+    const a = "01a1b236-5132-7527-8e5d-25c3d71f6b16";
+    const b = "01a1b236-5133-7a10-9c44-0b7e2d9e41aa";
+    expect(a.slice(0, 8)).toBe(b.slice(0, 8));
+    expect(shortId(a)).toBe("d71f6b16");
+    expect(shortId(a)).not.toBe(shortId(b));
+  });
+});
+
+describe("monthProgress", () => {
+  const now = new Date("2026-11-09T12:00:00Z");
+  it("marks only the current month as partial, with how far through it is", () => {
+    expect(monthProgress("2026-11", now)).toEqual({ partial: true, days_elapsed: 9, days_in_month: 30 });
+    expect(monthProgress("2026-10", now)).toEqual({ partial: false, days_elapsed: 31, days_in_month: 31 });
+  });
+  it("knows leap-year February", () => {
+    expect(monthProgress("2028-02", new Date("2028-03-05T00:00:00Z")).days_in_month).toBe(29);
+  });
+});
 
 describe("allocateByWeight", () => {
   it("splits exactly, including negative totals and zero weights", () => {
@@ -77,37 +98,33 @@ describe("grid state", () => {
   });
 });
 
-describe("product art", () => {
-  it("renders every motif deterministically and never echoes a bad country code", () => {
-    for (const motif of ART_MOTIFS) {
-      const svg = productArtSvg({ motif, tone: 3, cc: "JP" });
-      expect(svg.startsWith("<svg")).toBe(true);
-      expect(svg).toBe(productArtSvg({ motif, tone: 3, cc: "JP" }));
-    }
-    expect(productArtSvg({ motif: "mug", tone: 0, cc: "<script>" })).toContain(">XX<");
+describe("seed data", () => {
+  const specs = Object.entries(SERVICES);
+  const all = specs.flatMap(([slug, list]) => list.map((spec) => ({ slug, spec })));
+  it("has ten freelancers and ten clients, each freelancer with four services and unique service codes", () => {
+    expect(FREELANCERS).toHaveLength(10);
+    expect(CLIENTS).toHaveLength(10);
+    expect(new Set(FREELANCERS.map((f) => f.slug)).size).toBe(10);
+    for (const f of FREELANCERS) expect(SERVICES[f.slug]?.length, f.slug).toBe(4);
+    for (const [slug, list] of specs) expect(new Set(list.map((x) => x.code)).size, slug).toBe(list.length);
   });
-});
-
-describe("seed catalogue", () => {
-  const all = Object.values(CATALOGUE).flat();
-  it("has unique SKUs, valid titles and no products the eval searches for", () => {
-    expect(new Set(all.map((p) => p.sku)).size).toBe(all.length);
-    for (const p of all) {
-      for (const t of Object.values(p.t)) expect(t!.length).toBeLessThanOrEqual(SEO_TITLE_MAX);
-      expect(p.motif).not.toBe("board");
-      expect(p.motif).not.toBe("clock");
+  it("gives every freelancer a hero service written in every language, with titles that fit an SEO title", () => {
+    for (const f of FREELANCERS) {
+      const hero = SERVICES[f.slug]!.filter((x) => x.hero);
+      expect(hero, f.slug).toHaveLength(1);
+      for (const lang of LANGS) expect(hero[0]!.t[lang], `${f.slug} ${lang}`).toBeTruthy();
     }
+    for (const { slug, spec } of all) for (const t of Object.values(spec.t)) expect(t!.title.length, `${slug} ${spec.code}`).toBeLessThanOrEqual(SEO_TITLE_MAX);
   });
-  it("gives hero products a title in every buyer language", () => {
-    for (const p of all.filter((x) => x.hero)) {
-      for (const m of BUYER_MARKETS) {
-        expect(isMarketLocale(m)).toBe(true);
-        expect(p.t[langOf(m)], `${p.sku} ${m}`).toBeTruthy();
-      }
+  it("uses supported markets for every person, and a language for each", () => {
+    for (const p of [...FREELANCERS, ...CLIENTS]) {
+      expect(isMarketLocale(p.locale), p.locale).toBe(true);
+      expect(LANGS).toContain(langOf(p.locale));
     }
   });
-  it("has every conversation line in every language", () => {
-    for (const lines of Object.values(SCRIPTS)) for (const l of lines) for (const lang of ["en", "de", "fr", "es", "it", "ja", "hi"] as const) expect(l[lang]).toBeTruthy();
+  it("has every brief and conversation line in every language", () => {
+    for (const b of Object.values(BRIEFS)) for (const lang of LANGS) expect(b[lang]?.title && b[lang]?.description, lang).toBeTruthy();
+    for (const lines of Object.values(SCRIPTS)) for (const l of lines) for (const lang of LANGS) expect(l[lang]).toBeTruthy();
   });
   it("uses a deterministic PRNG", () => {
     const a = createRng(7);

@@ -7,22 +7,23 @@ import { LanguagePicker, useI18n } from "@/components/i18n/I18nProvider";
 import { CountryStamp } from "@/components/ui";
 import type { MessageKey } from "@/lib/i18n/messages";
 
-type Account = { id: string; name: string; country: string; locale: string; currency?: string };
+type Account = { id: string; name: string; company_name?: string | null; country: string; locale: string; currency?: string };
+type Role = "FREELANCER" | "CLIENT";
 
 export default function LoginPage() {
   const { t } = useI18n();
   const router = useRouter();
-  const [accounts, setAccounts] = useState<{ sellers: Account[]; buyers: Account[] } | null>(null);
+  const [accounts, setAccounts] = useState<{ freelancers: Account[]; clients: Account[] } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState<string | null>(null);
 
   useEffect(() => {
-    api<{ sellers: Account[]; buyers: Account[] }>("/api/auth/demo-users")
+    api<{ freelancers: Account[]; clients: Account[] }>("/api/auth/demo-users")
       .then(setAccounts)
       .catch((e: unknown) => setError(e instanceof Error ? e.message : "Could not load accounts."));
   }, []);
 
-  async function login(role: "SELLER" | "BUYER", id: string) {
+  async function login(role: Role, id: string) {
     setPending(id);
     try {
       const res = await api<{ redirect: string }>("/api/auth/demo", { body: { role, id } });
@@ -34,7 +35,7 @@ export default function LoginPage() {
     }
   }
 
-  const list = (role: "SELLER" | "BUYER", items: Account[]) => (
+  const list = (role: Role, items: Account[]) => (
     <ul className="divide-y divide-dashed divide-rule-strong">
       {items.map((a) => (
         <li key={a.id}>
@@ -45,9 +46,9 @@ export default function LoginPage() {
           >
             <CountryStamp country={a.country} />
             <span className="min-w-0 flex-1">
-              <span className="block truncate font-medium text-ink">{a.name}</span>
+              <span className="block truncate font-medium text-ink">{a.company_name ? `${a.name} · ${a.company_name}` : a.name}</span>
               <span className="block text-sm text-ink-3">
-                {role === "SELLER" ? t("login.sellsIn", { currency: a.currency ?? "", lang: t(`langname.${a.locale.slice(0, 2)}` as MessageKey) }) : t("login.shopsIn", { lang: t(`langname.${a.locale.slice(0, 2)}` as MessageKey) })}
+                {role === "FREELANCER" ? t("login.worksIn", { currency: a.currency ?? "", lang: t(`langname.${a.locale.slice(0, 2)}` as MessageKey) }) : t("login.hiresIn", { lang: t(`langname.${a.locale.slice(0, 2)}` as MessageKey) })}
               </span>
             </span>
             <span className="text-sm font-medium text-accent">{pending === a.id ? t("login.signingIn") : t("login.signIn")}</span>
@@ -77,19 +78,19 @@ export default function LoginPage() {
       {!accounts && !error && <p className="text-ink-3">{t("login.loading")}</p>}
       {accounts && (
         <div className="grid gap-6 md:grid-cols-2">
-          <section aria-labelledby="sellers" className="rounded-[10px] border border-rule bg-sheet p-4 md:p-5">
-            <h2 id="sellers" className="font-display text-xl font-semibold">
-              {t("login.makers")}
+          <section aria-labelledby="freelancers" className="rounded-[10px] border border-rule bg-sheet p-4 md:p-5">
+            <h2 id="freelancers" className="font-display text-xl font-semibold">
+              {t("login.freelancers")}
             </h2>
-            <p className="mb-2 text-sm text-ink-3">{t("login.makersSub")}</p>
-            {list("SELLER", accounts.sellers)}
+            <p className="mb-2 text-sm text-ink-3">{t("login.freelancersSub")}</p>
+            {list("FREELANCER", accounts.freelancers)}
           </section>
-          <section aria-labelledby="buyers" className="rounded-[10px] border border-rule bg-sheet p-4 md:p-5">
-            <h2 id="buyers" className="font-display text-xl font-semibold">
-              {t("login.buyers")}
+          <section aria-labelledby="clients" className="rounded-[10px] border border-rule bg-sheet p-4 md:p-5">
+            <h2 id="clients" className="font-display text-xl font-semibold">
+              {t("login.clients")}
             </h2>
-            <p className="mb-2 text-sm text-ink-3">{t("login.buyersSub")}</p>
-            {list("BUYER", accounts.buyers)}
+            <p className="mb-2 text-sm text-ink-3">{t("login.clientsSub")}</p>
+            {list("CLIENT", accounts.clients)}
           </section>
         </div>
       )}

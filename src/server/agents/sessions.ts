@@ -15,10 +15,18 @@ import type { ChatMessage } from "./model";
 
 const STALE_AFTER_MS = 10 * 60 * 1000;
 
-export type SessionOwner = { type: "SELLER"; sellerId: string } | { type: "BUYER"; buyerId: string };
+/** The account a conversation belongs to. */
+export type SessionOwner =
+  | { type: "FREELANCER"; freelancerId: string }
+  | { type: "CLIENT"; clientId: string };
 
 function ownerWhere(owner: SessionOwner) {
-  return owner.type === "SELLER" ? { seller_id: owner.sellerId } : { buyer_id: owner.buyerId };
+  switch (owner.type) {
+    case "FREELANCER":
+      return { freelancer_id: owner.freelancerId };
+    case "CLIENT":
+      return { client_id: owner.clientId };
+  }
 }
 
 export async function createSession(owner: SessionOwner, agent: AgentName, locale: string, parentId?: string): Promise<AgentSession> {
@@ -28,7 +36,7 @@ export async function createSession(owner: SessionOwner, agent: AgentName, local
       actor: owner.type,
       locale,
       parent_id: parentId ?? null,
-      ...(owner.type === "SELLER" ? { seller_id: owner.sellerId } : { buyer_id: owner.buyerId }),
+      ...ownerWhere(owner),
     },
   });
 }

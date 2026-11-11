@@ -41,6 +41,12 @@ export function formatChange(bps: number | null | undefined): string {
   return `${sign}${(Math.abs(bps) / 100).toFixed(1)}%`;
 }
 
+/**
+ * The part of an id a person can tell orders apart by. UUIDv7 ids start with a
+ * timestamp, so ids created together share their first 8 characters; the tail is the random part.
+ */
+export const shortId = (id: string): string => id.slice(-8);
+
 export const formatCount = (n: number) => new Intl.NumberFormat("en-US").format(n);
 
 /** Relative age for message lists: "just now", "5 min", "3 h", "2 d", else a date. */
@@ -70,14 +76,6 @@ export function moneyCsv(m: MoneyLike | null | undefined): string {
   const exp = m.currency === "JPY" ? 0 : 2;
   return `${(m.amount_minor / 10 ** exp).toFixed(exp)} ${m.currency}`;
 }
-
-export const ORDER_STATUS_LABEL: Record<string, string> = {
-  PAID: "Paid",
-  PARTIALLY_REFUNDED: "Part refunded",
-  REFUNDED: "Refunded",
-  PENDING_PAYMENT: "Payment failed",
-  CART: "In cart",
-};
 
 export const LANGUAGE_OF: Record<string, string> = {
   "en-US": "English",

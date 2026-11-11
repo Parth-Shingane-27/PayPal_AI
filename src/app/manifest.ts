@@ -2,9 +2,9 @@ import type { MetadataRoute } from "next";
 
 export default function manifest(): MetadataRoute.Manifest {
   return {
-    name: "GlobalCart",
-    short_name: "GlobalCart",
-    description: "List once, sell in 11 markets. Localized listings, PayPal checkout, and a clear view of every fee.",
+    name: "GlobalGig",
+    short_name: "GlobalGig",
+    description: "Freelance across borders: localized service pages, milestone payments through PayPal held until the work is accepted, payouts in your home currency.",
     start_url: "/",
     display: "standalone",
     background_color: "#fbf8f1",

@@ -3,10 +3,16 @@
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useBase } from "@/lib/use-base";
+import type { MessageKey } from "@/lib/i18n/messages";
+import { type DockAgent, chatStorageKey } from "./assistant/route-context";
+import { RESUME_EVENT } from "./assistant/AssistantContext";
+import { Markdown } from "./Markdown";
 import { api, type Money } from "./api";
-import { type CaptureOutcome, PayPalButtons } from "./PayPalButtons";
+import { useI18n } from "./i18n/I18nProvider";
+import { IconCheck } from "./icons";
+import { PayPalButtons } from "./PayPalButtons";
 
-type AgentName = "LISTING" | "SHOPPING" | "TREASURY" | "OPERATIONS";
+type AgentName = "PROFILE" | "HIRING" | "TREASURY" | "PROJECTS";
 type ToolCall = { id: string; name: string; ok: boolean; output?: unknown; error?: string; durationMs: number };
 type Turn = {
   agent: AgentName;
@@ -14,74 +20,31 @@ type Turn = {
   outcome: string;
   toolCalls: ToolCall[];
   pendingApprovals: { approval_id: string; message?: string; amount?: Money; total_including_fees?: Money }[];
-  checkoutLinks: { order_id: string; paypal_order_id: string; approve_url: string; total: Money }[];
+  /** A milestone the client can fund in PayPal. */
+  checkoutLinks: { contract_id: string; milestone_id: string; paypal_order_id: string; approve_url: string; amount: Money }[];
   usage: { input_tokens: number; cached_input_tokens: number; output_tokens: number; thinking_tokens: number; modelCalls: number };
 };
 type ChatResult = { sessionId: string; agent: AgentName; routed: { agent: AgentName; reason: string } | null; turns: Turn[]; handoff: { from: AgentName; to: AgentName } | null };
 type Step = { id: string; name: string; state: "running" | "ok" | "error" };
-type Product = { listing_id: string; title: string; summary?: string; description?: string; price: Money; seller: string | { name: string } };
-
-type Display = { display: string };
-export type CartView = {
-  cart_id: string;
-  seller: string;
-  currency: string;
-  status: string;
-  items: { listing_id: string; title: string; quantity: number; unit_price: Display; line_total: Display }[];
-  total: Display;
-};
-
-export type ShopDisplay = { outcome: "match" | "options" | "alternatives" | "none"; requested: string; listing_ids: string[] };
 
 type Entry =
   | { kind: "user"; text: string }
   | { kind: "assistant"; text: string; agent?: AgentName; turn?: Turn }
   | { kind: "notice"; text: string; tone: "info" | "error" };
 
-const AGENT_LABEL: Record<AgentName, string> = { LISTING: "Listing", SHOPPING: "Shopping", TREASURY: "Money", OPERATIONS: "Operations" };
-
-/** What each tool does, in plain words, for the progress list while the assistant works. */
-const STEP_LABEL: Record<string, string> = {
-  get_product: "Reading the product",
-  get_my_order: "Confirming your payment",
-  preview_product: "Checking the product details",
-  create_product: "Creating the product",
-  list_markets: "Checking the markets",
-  get_fx_rate: "Checking today's exchange rate",
-  suggest_price: "Working out a local price",
-  save_listing_draft: "Saving the draft listing",
-  search_products: "Searching products",
-  show_in_shop: "Updating the shop page",
-  convert_to_usd: "Converting to US dollars",
-  compare_products: "Comparing products",
-  add_to_cart: "Adding to your cart",
-  update_cart: "Updating your cart",
-  view_cart: "Looking at your cart",
-  create_paypal_order: "Preparing PayPal checkout",
-  get_balances: "Checking your balance",
-  estimate_fees: "Estimating fees",
-  forecast_earnings: "Forecasting earnings",
-  compare_selling_direct: "Comparing with selling direct",
-  propose_payout_schedule: "Preparing a payout for your approval",
-  query_orders: "Looking up orders",
-  get_order_details: "Reading the order",
-  get_payment_status: "Checking the payment",
-  earnings_by_market: "Adding up earnings by country",
-  detect_anomalies: "Checking for anything unusual",
-  propose_refund: "Preparing a refund for your approval",
-  handoff: "Passing you to the right assistant",
-};
-
-function productsOf(turn: Turn): Product[] {
-  const out: Product[] = [];
-  for (const c of turn.toolCalls) {
-    if (!c.ok || !c.output) continue;
-    const o = c.output as { results?: Product[]; listings?: Product[] };
-    if (c.name === "search_products" && o.results) out.push(...o.results);
-    if (c.name === "compare_products" && o.listings) out.push(...o.listings);
-  }
-  return [...new Map(out.map((p) => [p.listing_id, p])).values()];
-}
+/** Tools that have a plain-words progress label (chat.step.<tool>); anything else shows a generic one. */
+const STEP_TOOLS = [
+  "list_markets",
+  "get_fx_rate",
+  "get_balances",
+  "estimate_fees",
+  "forecast_earnings",
+  "propose_payout_schedule",
+  "earnings_by_market",
+  "detect_anomalies",
+  "propose_refund",
+  "handoff",
+];
 
 /** localStorage can be unavailable (private mode, blocked storage); the chat then just starts fresh. */
 function readStored(key: string): string | null {
@@ -121,40 +84,79 @@ async function* sse(res: Response): AsyncGenerator<{ event: string; data: unknow
   }
 }
 
+const field =
+  "rounded-md border border-rule-strong bg-sheet text-ink placeholder:text-ink-3 focus:border-accent";
+
+/**
+ * The conversation inside the assistant panel: history, messages (rendered
+ * markdown, streamed as they are written), progress while tools run, and the
+ * composer. It has no title or frame of its own; the panel provides those.
+ * Which agent it talks to, and which service or market it is scoped to, come
+ * from the panel.
+ */
 export function ChatPanel(props: {
-  title: string;
-  placeholder: string;
-  /** Seller screen agent; null routes through the Assistant classifier; omitted for buyers. */
-  agent?: "LISTING" | "TREASURY" | "OPERATIONS" | null;
-  productId?: string;
-  /** Buyer chats: PayPal client id for checkout buttons. */
-  paypalClientId?: string | null;
-  /** Called after each completed reply (e.g. to refresh listings). */
-  onResult?: () => void;
-  /** Extra scope for remembering the open conversation (e.g. the buyer's market). */
+  agent: DockAgent;
+  subjectId?: string;
+  /** Extra scope for remembering the open conversation (the "new service" chat, a client's market). */
   resumeKey?: string;
-  /** Example questions shown until the first message is sent; clicking one asks it. */
-  suggestions?: string[];
-  /** When set, recommended products are handed to the page (listing ids) instead of shown as cards in the chat. */
-  onProducts?: (shown: ShopDisplay) => void;
-  /** Buyer chats: called with the carts after the agent views or changes the cart, so the page can show them. */
-  onCart?: (carts: CartView[]) => void;
+  /** Client chats: PayPal client id for checkout buttons. */
+  paypalClientId?: string | null;
+  /** Called after each completed reply (e.g. to refresh service pages). */
+  onResult?: () => void;
+  /** Reports whether a reply is being written, so the panel can hold off switching agent. */
+  onBusyChange?: (busy: boolean) => void;
 }) {
+  const { t } = useI18n();
   const base = useBase();
+  const { agent, onResult, onBusyChange } = props;
+  const isClient = agent === "HIRING";
+  // The freelancer's routing assistant sends no agent; clients never choose one.
+  const apiAgent = agent === "ASSISTANT" || isClient ? null : agent;
+  const agentLabel = (a: AgentName) => t(`dock.agent.${a}` as MessageKey);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [entries, setEntries] = useState<Entry[]>([]);
   const [steps, setSteps] = useState<Step[]>([]);
   const [busy, setBusy] = useState(false);
   const [input, setInput] = useState("");
+  // The reply as it is being written. Text arrives in many small pieces; they are batched per frame.
+  const [live, setLive] = useState("");
+  const pending = useRef("");
+  const frame = useRef<number | null>(null);
   const [past, setPast] = useState<{ id: string; agent: AgentName; updated_at: string }[]>([]);
-  const [paid, setPaid] = useState<Record<string, CaptureOutcome>>({});
+  const [paid, setPaid] = useState<Record<string, { amount: string; status: string }>>({});
   const bottom = useRef<HTMLDivElement>(null);
-  const isBuyer = props.agent === undefined;
-  const { onResult, onProducts, onCart } = props;
   // The open conversation is remembered per chat, so leaving the page and coming back resumes it.
-  const storageKey = `globalcart.chat.${isBuyer ? "SHOPPING" : (props.agent ?? "ASSISTANT")}.${props.productId ?? "-"}.${props.resumeKey ?? "-"}`;
+  const storageKey = chatStorageKey(agent, props.subjectId, props.resumeKey);
+  const listQuery = isClient ? `?agent=${agent}` : apiAgent ? `?agent=${apiAgent}` : "";
 
-  const listQuery = props.agent ? `?agent=${props.agent}` : isBuyer ? "?agent=SHOPPING" : "";
+  useEffect(() => {
+    onBusyChange?.(busy);
+  }, [busy, onBusyChange]);
+  useEffect(() => () => onBusyChange?.(false), [onBusyChange]);
+
+  const dropLive = useCallback(() => {
+    if (frame.current !== null) cancelAnimationFrame(frame.current);
+    frame.current = null;
+    pending.current = "";
+    setLive("");
+  }, []);
+  const pushDelta = useCallback((text: string) => {
+    pending.current += text;
+    if (frame.current !== null) return;
+    frame.current = requestAnimationFrame(() => {
+      frame.current = null;
+      const chunk = pending.current;
+      pending.current = "";
+      setLive((cur) => cur + chunk);
+    });
+  }, []);
+  useEffect(
+    () => () => {
+      if (frame.current !== null) cancelAnimationFrame(frame.current);
+    },
+    [],
+  );
+
   const loadPast = useCallback(async () => {
     const res = await api<{ sessions: { id: string; agent: AgentName; updated_at: string }[] }>(`/api/chat/sessions${listQuery}`);
     setPast(res.sessions);
@@ -163,7 +165,7 @@ export function ChatPanel(props: {
   const loadSession = useCallback(async (id: string, replaceTranscript: boolean) => {
     const res = await api<{ transcript: ({ role: "user" | "assistant"; text: string } | { role: "tool"; name: string })[] }>(`/api/chat/sessions/${id}`);
     if (replaceTranscript) {
-      setEntries(res.transcript.flatMap((t): Entry[] => (t.role === "tool" ? [] : [{ kind: t.role, text: t.text }])));
+      setEntries(res.transcript.flatMap((tr): Entry[] => (tr.role === "tool" ? [] : [{ kind: tr.role, text: tr.text }])));
     }
   }, []);
 
@@ -183,12 +185,25 @@ export function ChatPanel(props: {
     });
   }, [storageKey, loadSession]);
 
+  // "Discuss" on a finding: continue the conversation that wrote it.
   useEffect(() => {
-    bottom.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
-  }, [entries, steps]);
+    const onResume = (e: Event) => {
+      const d = (e as CustomEvent<{ agent: string; sessionId: string }>).detail;
+      if (!d || d.agent !== agent) return;
+      setSessionId(d.sessionId);
+      writeStored(storageKey, d.sessionId);
+      loadSession(d.sessionId, true).catch(() => undefined);
+    };
+    window.addEventListener(RESUME_EVENT, onResume);
+    return () => window.removeEventListener(RESUME_EVENT, onResume);
+  }, [agent, storageKey, loadSession]);
 
-  async function send(override?: string) {
-    const text = (override ?? input).trim();
+  useEffect(() => {
+    bottom.current?.scrollIntoView({ behavior: live ? "auto" : "smooth", block: "nearest" });
+  }, [entries, steps, live]);
+
+  async function send() {
+    const text = input.trim();
     if (!text || busy) return;
     setInput("");
     setBusy(true);
@@ -198,34 +213,31 @@ export function ChatPanel(props: {
       const res = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text, session_id: sessionId, agent: props.agent ?? null, product_id: props.productId ?? null }),
+        body: JSON.stringify({
+          text,
+          session_id: sessionId,
+          agent: apiAgent,
+          ...(agent === "PROFILE" ? { service_id: props.subjectId ?? null } : {}),
+        }),
       });
       if (!res.ok || !res.body) {
         const err = (await res.json().catch(() => null)) as { error?: { message: string } } | null;
-        throw new Error(err?.error?.message ?? `Request failed (${res.status})`);
+        throw new Error(err?.error?.message ?? t("chat.requestFailed", { status: res.status }));
       }
       for await (const { event, data } of sse(res)) {
         const d = data as Record<string, unknown>;
-        if (event === "tool_started") setSteps((s) => [...s, { id: String(d.id), name: String(d.name), state: "running" }]);
-        else if (event === "tool_finished")
-          setSteps((s) => s.map((x) => (x.id === d.id ? { ...x, state: d.ok ? "ok" : "error" } : x)));
-        else if (event === "routed") setEntries((e) => [...e, { kind: "notice", tone: "info", text: `Passed to the ${AGENT_LABEL[d.agent as AgentName]} assistant.` }]);
-        else if (event === "handoff") setEntries((e) => [...e, { kind: "notice", tone: "info", text: `Passed to the ${AGENT_LABEL[d.to as AgentName]} assistant.` }]);
+        // A new model turn starts: whatever was streaming belonged to the previous turn (e.g. text before a tool call).
+        if (event === "model_call") dropLive();
+        else if (event === "text_delta") pushDelta(String(d.text ?? ""));
+        else if (event === "tool_started") setSteps((s) => [...s, { id: String(d.id), name: String(d.name), state: "running" }]);
+        else if (event === "tool_finished") setSteps((s) => s.map((x) => (x.id === d.id ? { ...x, state: d.ok ? "ok" : "error" } : x)));
+        else if (event === "routed") setEntries((e) => [...e, { kind: "notice", tone: "info", text: t("chat.passedTo", { agent: agentLabel(d.agent as AgentName) }) }]);
+        else if (event === "handoff") setEntries((e) => [...e, { kind: "notice", tone: "info", text: t("chat.passedTo", { agent: agentLabel(d.to as AgentName) }) }]);
         else if (event === "error") setEntries((e) => [...e, { kind: "notice", tone: "error", text: String(d.message) }]);
         else if (event === "result") {
           const r = data as ChatResult;
-          setEntries((e) => [...e, ...r.turns.map((t): Entry => ({ kind: "assistant", text: t.reply, agent: t.agent, turn: t }))]);
-          if (onProducts) {
-            // show_in_shop is the agent's own decision about what the shop page displays.
-            for (const t of r.turns) {
-              for (const c of t.toolCalls) if (c.name === "show_in_shop" && c.ok && c.output) onProducts(c.output as ShopDisplay);
-            }
-          }
-          if (onCart) {
-            const cartCalls = r.turns.flatMap((t) => t.toolCalls).filter((c) => c.ok && ["view_cart", "add_to_cart", "update_cart"].includes(c.name));
-            const last = cartCalls[cartCalls.length - 1];
-            if (last) onCart(((last.output as { carts?: CartView[] } | undefined)?.carts ?? []));
-          }
+          dropLive();
+          setEntries((e) => [...e, ...r.turns.map((tn): Entry => ({ kind: "assistant", text: tn.reply, agent: tn.agent, turn: tn }))]);
           setSessionId(r.sessionId);
           writeStored(storageKey, r.sessionId);
           await loadSession(r.sessionId, false);
@@ -234,8 +246,9 @@ export function ChatPanel(props: {
         }
       }
     } catch (err) {
-      setEntries((e) => [...e, { kind: "notice", tone: "error", text: err instanceof Error ? err.message : "Something went wrong." }]);
+      setEntries((e) => [...e, { kind: "notice", tone: "error", text: err instanceof Error ? err.message : t("chat.failed") }]);
     } finally {
+      dropLive();
       setBusy(false);
     }
   }
@@ -248,153 +261,152 @@ export function ChatPanel(props: {
   }
 
   return (
-    <section className="flex min-h-[32rem] flex-col rounded-lg border border-slate-200 bg-white">
-        <header className="flex items-center gap-2 border-b border-slate-200 px-4 py-2">
-          <h2 className="font-semibold">{props.title}</h2>
-          <select
-            className="ml-auto rounded border border-slate-300 px-2 py-1 text-xs"
-            value={sessionId ?? ""}
-            onChange={(e) => {
-              const id = e.target.value;
-              if (!id) return newChat();
-              setSessionId(id);
-              writeStored(storageKey, id);
-              void loadSession(id, true);
-            }}
-          >
-            <option value="">New conversation</option>
-            {past.map((s) => (
-              <option key={s.id} value={s.id}>
-                {AGENT_LABEL[s.agent]} · {new Date(s.updated_at).toLocaleString()}
-              </option>
-            ))}
-          </select>
-        </header>
+    <section aria-label={t("dock.chat")} className="flex h-full min-h-0 flex-col">
+      <div className="flex items-center gap-2 border-b border-rule px-3 py-2">
+        <select
+          aria-label={t("chat.history")}
+          className={`${field} min-h-10 min-w-0 flex-1 px-2 text-sm`}
+          value={sessionId ?? ""}
+          onChange={(e) => {
+            const id = e.target.value;
+            if (!id) return newChat();
+            setSessionId(id);
+            writeStored(storageKey, id);
+            void loadSession(id, true);
+          }}
+        >
+          <option value="">{t("chat.new")}</option>
+          {past.map((s) => (
+            <option key={s.id} value={s.id}>
+              {agentLabel(s.agent)} · {new Date(s.updated_at).toLocaleString()}
+            </option>
+          ))}
+        </select>
+        <button
+          type="button"
+          onClick={newChat}
+          disabled={busy || (entries.length === 0 && !sessionId)}
+          className="inline-flex min-h-10 shrink-0 cursor-pointer items-center rounded-md border border-rule-strong px-3 text-sm font-medium text-ink-2 hover:bg-sheet-2 hover:text-ink disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {t("chat.newShort")}
+        </button>
+      </div>
 
-        <div className="flex-1 space-y-3 overflow-y-auto p-4">
-          {entries.length === 0 && (
-            <div className="space-y-3">
-              <p className="text-sm text-slate-500">{props.placeholder}</p>
-              {props.suggestions && props.suggestions.length > 0 && (
-                <div>
-                  <p className="mb-1.5 text-xs font-medium uppercase tracking-wide text-slate-400">Try asking</p>
-                  <div className="flex flex-wrap gap-2">
-                    {props.suggestions.map((q) => (
-                      <button
-                        key={q}
-                        type="button"
-                        disabled={busy}
-                        onClick={() => void send(q)}
-                        className="rounded-full border border-slate-300 px-3 py-1 text-left text-xs text-slate-700 hover:bg-slate-50 disabled:opacity-50"
-                      >
-                        {q}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
+      <div className="@container min-h-0 flex-1 space-y-3 overflow-y-auto px-4 py-4">
+        {entries.length === 0 && !busy && <p className="max-w-[44ch] text-sm leading-relaxed text-ink-3">{t(`dock.hint.${agent}` as MessageKey)}</p>}
+        <div role="log" aria-live="polite" aria-relevant="additions" className="space-y-3">
           {entries.map((e, i) => {
-            if (e.kind === "user") return <p key={i} className="ml-auto max-w-[85%] whitespace-pre-wrap rounded-lg bg-blue-600 px-3 py-2 text-sm text-white">{e.text}</p>;
-            if (e.kind === "notice")
+            if (e.kind === "user")
               return (
-                <p key={i} className={`rounded px-3 py-1.5 text-xs ${e.tone === "error" ? "bg-red-50 text-red-800" : "bg-slate-100 text-slate-600"}`}>
+                <p key={i} className="ml-auto max-w-[88%] rounded-lg bg-ink px-3 py-2 text-sm whitespace-pre-wrap text-sheet">
                   {e.text}
                 </p>
               );
-            const t = e.turn;
-            const products = t && !onProducts ? productsOf(t) : [];
+            if (e.kind === "notice")
+              return (
+                <p key={i} className={`rounded-md px-3 py-1.5 text-xs ${e.tone === "error" ? "bg-alert-soft text-alert-ink" : "bg-sheet-2 text-ink-2"}`}>
+                  {e.text}
+                </p>
+              );
+            const tn = e.turn;
             return (
-              <div key={i} className="max-w-[95%] space-y-2">
-                {e.agent && <p className="text-xs font-medium text-slate-500">{AGENT_LABEL[e.agent]} assistant</p>}
-                <div className="whitespace-pre-wrap rounded-lg bg-slate-100 px-3 py-2 text-sm">{e.text}</div>
-                {products.length > 0 && (
-                  <div className="grid gap-2 sm:grid-cols-2">
-                    {products.map((p) => (
-                      <div key={p.listing_id} className="rounded border border-slate-200 p-2 text-sm">
-                        <p className="font-medium">{p.title}</p>
-                        <p className="text-slate-600">{typeof p.seller === "string" ? p.seller : p.seller.name}</p>
-                        <p className="font-semibold">{p.price.display}</p>
-                        <p className="line-clamp-3 text-xs text-slate-500">{p.summary ?? p.description}</p>
-                      </div>
-                    ))}
-                  </div>
-                )}
-                {t?.pendingApprovals.map((a) => (
-                  <div key={a.approval_id} className="rounded border border-amber-300 bg-amber-50 p-2 text-sm">
-                    Waiting for your approval{a.amount ? `: ${a.amount.display}` : a.total_including_fees ? `: ${a.total_including_fees.display}` : ""}.{" "}
-                    <Link className="text-blue-700 underline" href={`${base}/approvals`}>
-                      Review on the Approvals page
-                    </Link>
-                  </div>
-                ))}
-                {t?.checkoutLinks.map((c) =>
-                  paid[c.order_id] ? (
-                    <p key={c.paypal_order_id} className="rounded bg-positive-soft p-2 text-sm text-positive-ink">
-                      Order placed. Paid {paid[c.order_id]!.total.display}.
-                      {paid[c.order_id]!.delivery && <> Estimated delivery: {paid[c.order_id]!.delivery!.display}.</>}
+              <div key={i} className="space-y-2">
+                {e.agent && <p className="text-xs font-medium text-ink-3">{t("chat.assistantOf", { agent: agentLabel(e.agent) })}</p>}
+                <Markdown text={e.text} className="rounded-lg bg-sheet-2 px-3 py-2 text-sm text-ink" />
+                {tn?.pendingApprovals.map((a) => {
+                  const amount = a.amount?.display ?? a.total_including_fees?.display;
+                  return (
+                    <div key={a.approval_id} className="rounded-md bg-gold-soft px-3 py-2 text-sm text-gold-ink">
+                      {amount ? t("chat.approvalAmount", { amount }) : t("chat.approval")}{" "}
+                      <Link className="font-semibold underline" href={`${base}/approvals`}>
+                        {t("chat.reviewApprovals")}
+                      </Link>
+                    </div>
+                  );
+                })}
+                {tn?.checkoutLinks.map((c) => {
+                  const key = c.milestone_id;
+                  const amount = c.amount;
+                  const done = paid[key];
+                  return done ? (
+                    <p key={c.paypal_order_id} className="rounded-md bg-positive-soft px-3 py-2 text-sm text-positive-ink">
+                      {t("chat.funded", { amount: done.amount, status: done.status })}
                     </p>
                   ) : (
-                    <div key={c.paypal_order_id} className="rounded border border-blue-200 bg-blue-50 p-3 text-sm">
-                      <p className="mb-2">Approve {c.total.display} in PayPal. Nothing is charged until you do.</p>
+                    <div key={c.paypal_order_id} className="rounded-md border border-rule bg-sheet p-3 text-sm">
+                      <p className="mb-2 text-ink-2">{t("chat.approveMilestone", { amount: amount.display })}</p>
                       <PayPalButtons
                         clientId={props.paypalClientId ?? null}
-                        currency={c.total.currency}
-                        cartId={c.order_id}
+                        currency={amount.currency}
+                        contractId={c.contract_id}
                         paypalOrderId={c.paypal_order_id}
                         approveUrl={c.approve_url}
-                        onPaid={(o) => {
-                          setPaid((p) => ({ ...p, [c.order_id]: o }));
-                          // The agent confirms from the order record, not from this message.
-                          if (o.order_status === "PAID") void send(`I approved the payment in PayPal (order ${c.order_id}).`);
-                        }}
+                        onPaid={(o) =>
+                          setPaid((p) => ({
+                            ...p,
+                            [key]: { amount: o.amount.display, status: o.milestone_state },
+                          }))
+                        }
                       />
                     </div>
-                  ),
-                )}
+                  );
+                })}
               </div>
             );
           })}
-          {busy && (
-            <ul className="space-y-1 text-xs text-slate-600">
-              <li>Thinking…</li>
-              {steps.map((s) => (
-                <li key={s.id}>
-                  {s.state === "running" ? "⏳" : "✓"} {STEP_LABEL[s.name] ?? "Working on it"}
-                  {s.state === "running" ? "…" : ""}
-                </li>
-              ))}
-            </ul>
-          )}
-          <div ref={bottom} />
         </div>
+        {busy && (
+          <ul className="space-y-1 text-xs text-ink-3" aria-label={t("chat.progress")}>
+            {!live && (
+              <li className="flex items-center gap-2">
+                <span className="h-2 w-2 animate-pulse rounded-full bg-ink-3 motion-reduce:animate-none" aria-hidden />
+                {t("chat.thinking")}
+              </li>
+            )}
+            {steps.map((s) => (
+              <li key={s.id} className="flex items-center gap-2">
+                {s.state === "ok" ? <IconCheck className="h-3.5 w-3.5 text-positive-ink" /> : <span className={`h-2 w-2 rounded-full ${s.state === "error" ? "bg-alert" : "animate-pulse bg-ink-3 motion-reduce:animate-none"}`} aria-hidden />}
+                {t((STEP_TOOLS.includes(s.name) ? `chat.step.${s.name}` : "chat.step.default") as MessageKey)}
+                {s.state === "running" ? "…" : ""}
+              </li>
+            ))}
+          </ul>
+        )}
+        {busy && live && (
+          // Hidden from screen readers while it grows; the finished reply is announced once, when it is added to the log.
+          <div aria-hidden="true">
+            <Markdown text={`${live} ▍`} className="rounded-lg bg-sheet-2 px-3 py-2 text-sm text-ink" />
+          </div>
+        )}
+        <div ref={bottom} />
+      </div>
 
-        <form
-          className="flex gap-2 border-t border-slate-200 p-3"
-          onSubmit={(e) => {
-            e.preventDefault();
-            void send();
+      <form
+        className="flex items-end gap-2 border-t border-rule p-3"
+        onSubmit={(e) => {
+          e.preventDefault();
+          void send();
+        }}
+      >
+        <textarea
+          className={`${field} max-h-40 min-h-11 flex-1 resize-none px-3 py-2.5 text-sm`}
+          maxLength={4000}
+          rows={2}
+          value={input}
+          aria-label={t("chat.input")}
+          placeholder={t("chat.input")}
+          onChange={(e) => setInput(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && !e.shiftKey) {
+              e.preventDefault();
+              void send();
+            }
           }}
-        >
-          <textarea
-            className="min-h-[2.5rem] flex-1 resize-y rounded border border-slate-300 px-3 py-2 text-sm"
-            maxLength={4000}
-            rows={2}
-            value={input}
-            placeholder="Type a message…"
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && !e.shiftKey) {
-                e.preventDefault();
-                void send();
-              }
-            }}
-          />
-          <button className="rounded bg-blue-600 px-4 text-sm font-medium text-white disabled:opacity-50" disabled={busy || !input.trim()}>
-            Send
-          </button>
-        </form>
+        />
+        <button className="inline-flex min-h-11 shrink-0 cursor-pointer items-center rounded-md bg-accent px-4 text-sm font-semibold text-sheet hover:brightness-95 disabled:cursor-not-allowed disabled:opacity-50" disabled={busy || !input.trim()}>
+          {t("chat.send")}
+        </button>
+      </form>
     </section>
   );
 }

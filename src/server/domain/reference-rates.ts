@@ -2,7 +2,7 @@ import { type Currency, convertMinor, isSupportedCurrency } from "./money";
 
 /**
  * Fixed, indicative exchange rates (units per 1 USD). Used only to put a
- * multi-currency seller's KPIs and charts on one axis, and by the seed to set
+ * multi-currency freelancer's KPIs and charts on one axis, and by the seed to set
  * plausible local prices. Every figure derived from these is labelled
  * "at reference rates" in the UI; ledgers and grids keep native currencies.
  */
@@ -14,6 +14,8 @@ export const REFERENCE_USD_RATES: Record<Currency, number> = {
   AUD: 1.52,
   MXN: 18.2,
   JPY: 152,
+  BRL: 5.4,
+  PHP: 57,
 };
 
 export function referenceRate(from: string, to: string): number {

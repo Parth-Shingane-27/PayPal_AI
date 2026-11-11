@@ -6,17 +6,17 @@ import { AppError, notFound } from "../errors";
 import type { AuditCtx } from "../services/audit";
 import { buildContext } from "./context";
 import type { ModelApi } from "./model";
-import { AGENTS, SELLER_AGENT_NAMES } from "./registry";
+import { agentSpec, FREELANCER_AGENT_NAMES } from "./registry";
 import { type Classifier, classifyWithGroq, type Route } from "./router";
 import { type RunEvent, type RunResult, runAgent } from "./runtime";
 import { createSession, getSession, type SessionOwner } from "./sessions";
 
 /**
  * Orchestration is code, plus one small classifier:
- *  - buyers only ever reach the Shopping Agent;
- *  - seller screens map straight to an agent (editor -> Listing, treasury ->
- *    Treasury, orders -> Operations);
- *  - the seller Assistant box routes a NEW conversation once, then it stays;
+ *  - clients only ever reach the Hiring Agent;
+ *  - freelancer screens map straight to an agent (service editor -> Profile,
+ *    earnings -> Treasury, projects -> Projects);
+ *  - the freelancer Assistant box routes a NEW conversation once, then it stays;
  *  - at most one handoff per user message, never back to the same agent.
  */
 
@@ -31,12 +31,12 @@ type ChatRequest = {
   text: string;
   /** Continue this conversation; omit to start a new one. */
   sessionId?: string | null;
-  /** Seller screens name their agent; null/undefined in the Assistant box. Ignored for buyers. */
+  /** Freelancer screens name their agent; null/undefined in the Assistant box. Ignored for clients. */
   agent?: AgentName | null;
-  /** Buyer market from the session; ignored for sellers (their own locale applies). */
+  /** Client market from the session; ignored for freelancers (their own locale applies). */
   marketLocale?: string | null;
-  /** Listing editor: the product being edited. */
-  productId?: string | null;
+  /** Service editor: the service being edited. */
+  serviceId?: string | null;
   onEvent?: (e: OrchestratorEvent) => void;
   deps?: { model?: ModelApi; classify?: Classifier; reasoningEffort?: ReasoningEffort; modelId?: string };
 };
@@ -50,10 +50,10 @@ export type ChatResponse = {
 };
 
 async function localeFor(req: ChatRequest): Promise<string> {
-  if (req.owner.type === "SELLER") {
-    const seller = await prisma.seller.findUnique({ where: { id: req.owner.sellerId } });
-    if (!seller) throw notFound("Seller");
-    return seller.locale;
+  if (req.owner.type === "FREELANCER") {
+    const f = await prisma.freelancer.findUnique({ where: { id: req.owner.freelancerId } });
+    if (!f) throw notFound("Freelancer");
+    return f.locale;
   }
   const locale = req.marketLocale;
   if (!locale || !isMarketLocale(locale)) throw new AppError("INVALID_INPUT", "Choose a market first.");
@@ -70,10 +70,10 @@ export async function sendMessage(req: ChatRequest): Promise<ChatResponse> {
     session = await getSession(req.sessionId, owner);
   } else {
     let agent: AgentName;
-    if (owner.type === "BUYER") {
-      agent = "SHOPPING";
+    if (owner.type === "CLIENT") {
+      agent = "HIRING";
     } else if (req.agent) {
-      if (!(SELLER_AGENT_NAMES as readonly string[]).includes(req.agent)) throw new AppError("FORBIDDEN", "That assistant is not available to sellers.");
+      if (!(FREELANCER_AGENT_NAMES as readonly string[]).includes(req.agent)) throw new AppError("FORBIDDEN", "That assistant is not available to freelancers.");
       agent = req.agent;
     } else {
       routed = await (req.deps?.classify ?? classifyWithGroq)(req.text, audit);
@@ -82,7 +82,8 @@ export async function sendMessage(req: ChatRequest): Promise<ChatResponse> {
     }
     session = await createSession(owner, agent, await localeFor(req));
   }
-  if (owner.type === "BUYER" && session.agent !== "SHOPPING") throw notFound("Conversation");
+  if (owner.type === "CLIENT" && session.agent !== "HIRING") throw notFound("Conversation");
+  if (owner.type === "FREELANCER" && session.agent === "HIRING") throw notFound("Conversation");
   req.onEvent?.({ type: "session", sessionId: session.id, agent: session.agent });
 
   const market = getMarket(session.locale);
@@ -92,12 +93,12 @@ export async function sendMessage(req: ChatRequest): Promise<ChatResponse> {
   const first = await runAgent({
     ...base,
     sessionId: session.id,
-    spec: AGENTS[session.agent],
+    spec: agentSpec(session.agent),
     userText: req.text,
-    context: await buildContext(owner, market, { productId: req.productId }),
+    context: await buildContext(owner, market, { serviceId: req.serviceId }),
   });
 
-  if (!first.handoff || owner.type !== "SELLER" || first.handoff.agent === session.agent) {
+  if (!first.handoff || owner.type !== "FREELANCER" || first.handoff.agent === session.agent) {
     return { sessionId: session.id, agent: session.agent, routed, turns: [first], handoff: null };
   }
 
@@ -107,7 +108,7 @@ export async function sendMessage(req: ChatRequest): Promise<ChatResponse> {
   const second = await runAgent({
     ...base,
     sessionId: child.id,
-    spec: AGENTS[to],
+    spec: agentSpec(to),
     userText: req.text,
     context: await buildContext(owner, market, { handoff: { from: session.agent, summary: first.handoff.summary } }),
     handoffAllowed: false,

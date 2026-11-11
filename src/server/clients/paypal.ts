@@ -1,3 +1,4 @@
+import type { ActorType, AgentName } from "@/generated/prisma/enums";
 import { z } from "zod";
 import { type PaypalConfig, paypalConfig } from "../config";
 import { parseDecimal, isSupportedCurrency, toDecimalString } from "../domain/money";
@@ -17,11 +18,11 @@ export type FetchFn = typeof fetch;
 
 /** Who caused a PayPal call; written to the audit row. */
 export type CallContext = {
-  actor: "SELLER" | "BUYER" | "SYSTEM";
+  actor: ActorType;
   actorId?: string | null;
-  sellerId?: string | null;
+  freelancerId?: string | null;
   sessionId?: string | null;
-  agent?: "LISTING" | "SHOPPING" | "TREASURY" | "OPERATIONS" | null;
+  agent?: AgentName | null;
 };
 
 export type PayPalCallRecord = {
@@ -149,6 +150,8 @@ type CreateOrderInput = {
   locale: string;
   returnUrl: string;
   cancelUrl: string;
+  /** "service": freelance work (no item category, no shipping address). Default "goods". */
+  kind?: "goods" | "service";
 };
 
 export type CaptureResult = {
@@ -364,7 +367,7 @@ export class PayPalClient {
             sku: i.sku.slice(0, 127),
             quantity: String(i.quantity),
             unit_amount: amount(i.unitMinor, input.currency),
-            category: "PHYSICAL_GOODS",
+            ...(input.kind === "service" ? {} : { category: "PHYSICAL_GOODS" }),
           })),
         },
       ],
@@ -374,7 +377,7 @@ export class PayPalClient {
             brand_name: cfg.PAYPAL_BRAND_NAME,
             locale: paypalLocale(input.locale),
             user_action: "PAY_NOW",
-            shipping_preference: "GET_FROM_FILE",
+            shipping_preference: input.kind === "service" ? "NO_SHIPPING" : "GET_FROM_FILE",
             return_url: input.returnUrl,
             cancel_url: input.cancelUrl,
           },
@@ -457,7 +460,7 @@ export class PayPalClient {
     const body = {
       sender_batch_header: {
         sender_batch_id: input.senderBatchId,
-        email_subject: "You have a payout from GlobalCart",
+        email_subject: "You have a payout from GlobalGig",
       },
       items: [
         {

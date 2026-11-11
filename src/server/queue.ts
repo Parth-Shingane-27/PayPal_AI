@@ -10,11 +10,15 @@ export const QUEUE_NAMES = {
   webhooks: "webhooks",
   embeddings: "embeddings",
   payouts: "payouts",
+  watch: "watch",
 } as const;
 
 export type WebhookJob = { eventId: string };
-export type EmbeddingJob = { listingId: string };
+/** A service page or a freelancer's skills profile to (re-)embed. */
+export type EmbeddingJob = { kind: "service_page" | "freelancer"; id: string };
+/** A freelancer_payouts row to send. */
 export type PayoutJob = { payoutId: string };
+export type WatchJob = { freelancerId: string };
 
 /** BullMQ needs maxRetriesPerRequest: null on every connection it uses. */
 export function redisConnection() {
@@ -23,7 +27,7 @@ export function redisConnection() {
 
 /** Separate key prefix for tests so they never see dev jobs. */
 export function queuePrefix(): string {
-  return process.env.NODE_ENV === "test" ? "gc-test" : "gc";
+  return process.env.NODE_ENV === "test" ? "gg-test" : "gg";
 }
 
 const queues = new Map<string, Queue>();
@@ -51,14 +55,9 @@ export async function enqueueWebhook(eventId: string): Promise<void> {
   await queue(QUEUE_NAMES.webhooks).add("process", { eventId } satisfies WebhookJob, { jobId: eventId });
 }
 
-/**
- * Embedding jobs are keyed by listing and time so a re-publish re-embeds.
- * The job reads the listing's current text when it runs.
- */
-export async function enqueueEmbedding(listingId: string): Promise<void> {
-  await queue(QUEUE_NAMES.embeddings).add("embed", { listingId } satisfies EmbeddingJob, {
-    jobId: `${listingId}-${Date.now()}`,
-  });
+/** (Re-)embeds a service page or a freelancer's skills profile; keyed by time so a re-publish re-embeds. */
+export async function enqueueGigEmbedding(target: { kind: "service_page" | "freelancer"; id: string }): Promise<void> {
+  await queue(QUEUE_NAMES.embeddings).add("embed", target satisfies EmbeddingJob, { jobId: `${target.kind}-${target.id}-${Date.now()}` });
 }
 
 /** Job id = payout id: approving twice can never queue two payouts. */
@@ -72,6 +71,24 @@ export async function schedulePayoutJob(payoutId: string, runAt: Date): Promise<
     attempts: 8,
     backoff: { type: "exponential", delay: 30_000 },
   });
+}
+
+/** One proactive check per freelancer per 10-minute window: a burst of events becomes one run. */
+export const WATCH_WINDOW_MS = 10 * 60_000;
+
+export async function enqueueWatch(freelancerId: string, opts: { manual?: boolean; now?: number } = {}): Promise<void> {
+  const now = opts.now ?? Date.now();
+  await queue(QUEUE_NAMES.watch).add("watch", { freelancerId } satisfies WatchJob, {
+    // A manual "Check now" is never swallowed by the window; it is still one job per click.
+    jobId: opts.manual ? `watch-${freelancerId}-manual-${now}` : `watch-${freelancerId}-${Math.floor(now / WATCH_WINDOW_MS)}`,
+    attempts: 2,
+    backoff: { type: "fixed", delay: 30_000 },
+  });
+}
+
+/** Daily check for one freelancer. upsertJobScheduler is idempotent, so calling it on every boot is safe. */
+export async function scheduleDailyWatch(freelancerId: string): Promise<void> {
+  await queue(QUEUE_NAMES.watch).upsertJobScheduler(`daily-watch-${freelancerId}`, { every: 24 * 60 * 60_000 }, { name: "watch", data: { freelancerId } satisfies WatchJob });
 }
 
 export async function closeQueues(): Promise<void> {

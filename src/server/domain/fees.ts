@@ -8,28 +8,28 @@ import { applyBps, type Currency, currencyExponent } from "./money";
 export const FEE_TABLE = {
   /** PayPal commercial transaction rate. */
   paypal_rate_bps: 349,
-  /** Extra when the buyer's country differs from the seller's. */
+  /** Extra when the client's country differs from the freelancer's. */
   international_bps: 150,
-  /** Spread when the seller later converts a foreign-currency balance home. */
+  /** Spread when the freelancer later converts a foreign-currency balance home. */
   conversion_bps: 300,
   /** Payouts: 2% of the payout, capped per currency. */
   payout_bps: 200,
-  fixed_fee_minor: { USD: 49, GBP: 39, EUR: 39, CAD: 59, AUD: 59, MXN: 400, JPY: 40 } satisfies Record<Currency, number>,
-  payout_fee_cap_minor: { USD: 2000, GBP: 1600, EUR: 1800, CAD: 2700, AUD: 3000, MXN: 40000, JPY: 3000 } satisfies Record<
+  fixed_fee_minor: { USD: 49, GBP: 39, EUR: 39, CAD: 59, AUD: 59, MXN: 400, JPY: 40, BRL: 60, PHP: 1500 } satisfies Record<Currency, number>,
+  payout_fee_cap_minor: { USD: 2000, GBP: 1600, EUR: 1800, CAD: 2700, AUD: 3000, MXN: 40000, JPY: 3000, BRL: 10000, PHP: 112000 } satisfies Record<
     Currency,
     number
   >,
 } as const;
 
 export const ESTIMATE_NOTE =
-  "Fees are estimates from GlobalCart's fee table (PayPal 3.49% + fixed fee, +1.5% international, 3% conversion spread, payout fee 2% capped). Actual PayPal fees are recorded at capture.";
+  "Fees are estimates from GlobalGig's fee table (PayPal 3.49% + fixed fee, +1.5% international, 3% conversion spread, payout fee 2% capped). Actual PayPal fees are recorded at capture.";
 
 export type SaleContext = {
   currency: string;
   /** Country of the buying market. */
   marketCountry: string;
-  sellerCountry: string;
-  sellerCurrency: string;
+  freelancerCountry: string;
+  freelancerCurrency: string;
   platformBps: number;
 };
 
@@ -39,7 +39,7 @@ export type SaleFeeBreakdown = {
   conversion_cost: number;
   platform_fee: number;
   total_fees: number;
-  net_to_seller: number;
+  net_to_freelancer: number;
 };
 
 function fixedFee(currency: string): number {
@@ -47,12 +47,12 @@ function fixedFee(currency: string): number {
   return FEE_TABLE.fixed_fee_minor[currency as Currency];
 }
 
-function isInternational(ctx: Pick<SaleContext, "marketCountry" | "sellerCountry">): boolean {
-  return ctx.marketCountry !== ctx.sellerCountry;
+function isInternational(ctx: Pick<SaleContext, "marketCountry" | "freelancerCountry">): boolean {
+  return ctx.marketCountry !== ctx.freelancerCountry;
 }
 
-function needsConversion(ctx: Pick<SaleContext, "currency" | "sellerCurrency">): boolean {
-  return ctx.currency !== ctx.sellerCurrency;
+function needsConversion(ctx: Pick<SaleContext, "currency" | "freelancerCurrency">): boolean {
+  return ctx.currency !== ctx.freelancerCurrency;
 }
 
 /** Estimated fees for one sale of `grossMinor` (in ctx.currency). */
@@ -68,7 +68,7 @@ export function estimateSaleFees(grossMinor: number, ctx: SaleContext): SaleFeeB
     conversion_cost,
     platform_fee,
     total_fees,
-    net_to_seller: grossMinor - total_fees,
+    net_to_freelancer: grossMinor - total_fees,
   };
 }
 
@@ -92,4 +92,18 @@ export function estimatePayoutFee(amountMinor: number, currency: string): number
 export function payoutFeeCapThreshold(currency: string): number {
   currencyExponent(currency);
   return Math.ceil((FEE_TABLE.payout_fee_cap_minor[currency as Currency] * 10_000) / FEE_TABLE.payout_bps);
+}
+
+export const MAX_PAYOUTS_PER_SCHEDULE = 6;
+
+/** Largest payout whose amount + estimated fee fits in `available`. */
+export function maxPayoutFor(availableMinorUnits: number, currency: string): number {
+  let lo = 0;
+  let hi = Math.max(0, availableMinorUnits);
+  while (lo < hi) {
+    const mid = Math.ceil((lo + hi) / 2);
+    if (mid + estimatePayoutFee(mid, currency) <= availableMinorUnits) lo = mid;
+    else hi = mid - 1;
+  }
+  return lo;
 }

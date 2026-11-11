@@ -8,7 +8,10 @@ import { type Db, prisma } from "../db";
  * comes from model input.
  */
 
-export type Actor = { type: "SELLER"; sellerId: string } | { type: "BUYER"; buyerId: string } | { type: "SYSTEM" };
+export type Actor =
+  | { type: "FREELANCER"; freelancerId: string }
+  | { type: "CLIENT"; clientId: string }
+  | { type: "SYSTEM" };
 
 export type AuditCtx = {
   actor: Actor;
@@ -19,14 +22,26 @@ export type AuditCtx = {
 export const SYSTEM: AuditCtx = { actor: { type: "SYSTEM" } };
 
 export function actorId(actor: Actor): string | null {
-  return actor.type === "SELLER" ? actor.sellerId : actor.type === "BUYER" ? actor.buyerId : null;
+  switch (actor.type) {
+    case "FREELANCER":
+      return actor.freelancerId;
+    case "CLIENT":
+      return actor.clientId;
+    case "SYSTEM":
+      return null;
+  }
 }
 
-export function toCallContext(ctx: AuditCtx, sellerId?: string | null): CallContext {
+/** The freelancer an audit row belongs to, when the actor is one. */
+export function freelancerIdOf(actor: Actor): string | null {
+  return actor.type === "FREELANCER" ? actor.freelancerId : null;
+}
+
+export function toCallContext(ctx: AuditCtx): CallContext {
   return {
     actor: ctx.actor.type,
     actorId: actorId(ctx.actor),
-    sellerId: sellerId ?? (ctx.actor.type === "SELLER" ? ctx.actor.sellerId : null),
+    freelancerId: freelancerIdOf(ctx.actor),
     sessionId: ctx.sessionId ?? null,
     agent: ctx.agent ?? null,
   };
@@ -49,11 +64,16 @@ export async function recordPayPalCall(ctx: CallContext, r: PayPalCallRecord): P
       error: r.error,
       actor: ctx.actor,
       actor_id: ctx.actorId ?? null,
-      seller_id: ctx.sellerId ?? null,
+      freelancer_id: ctx.freelancerId ?? null,
       session_id: ctx.sessionId ?? null,
       duration_ms: r.durationMs,
     },
   });
+}
+
+/** PayPal call context for GlobalGig money: the audit row belongs to the freelancer whose milestone or payout it is. */
+export function gigCallContext(ctx: AuditCtx, freelancerId: string): CallContext {
+  return { actor: ctx.actor.type, actorId: actorId(ctx.actor), freelancerId, sessionId: ctx.sessionId ?? null, agent: ctx.agent ?? null };
 }
 
 /** The PayPal client every service uses; each call is audited. */
@@ -67,7 +87,7 @@ type ToolCallRecord = {
   status: Extract<ActionStatus, "SUCCEEDED" | "FAILED">;
   error?: string;
   durationMs: number;
-  sellerId?: string | null;
+  freelancerId?: string | null;
 };
 
 export async function recordToolCall(ctx: AuditCtx, r: ToolCallRecord, db: Db = prisma): Promise<void> {
@@ -83,7 +103,7 @@ export async function recordToolCall(ctx: AuditCtx, r: ToolCallRecord, db: Db = 
       error: r.error,
       actor: ctx.actor.type,
       actor_id: actorId(ctx.actor),
-      seller_id: r.sellerId ?? (ctx.actor.type === "SELLER" ? ctx.actor.sellerId : null),
+      freelancer_id: r.freelancerId ?? freelancerIdOf(ctx.actor),
       session_id: ctx.sessionId ?? null,
       duration_ms: r.durationMs,
     },
@@ -107,7 +127,7 @@ export type RunUsage = {
 /** One MODEL row per agent run with its token usage. */
 export async function recordModelRun(
   ctx: AuditCtx,
-  r: { usage: RunUsage; outcome: string; error?: string; durationMs: number; tool?: "model.run" | "model.route" | "model.localize" },
+  r: { usage: RunUsage; outcome: string; error?: string; durationMs: number; tool?: "model.run" | "model.route" | "model.localize" | "model.market_search" | "model.market_extract" },
 ): Promise<void> {
   await prisma.agentAction.create({
     data: {
@@ -120,19 +140,19 @@ export async function recordModelRun(
       error: r.error,
       actor: ctx.actor.type,
       actor_id: actorId(ctx.actor),
-      seller_id: ctx.actor.type === "SELLER" ? ctx.actor.sellerId : null,
+      freelancer_id: freelancerIdOf(ctx.actor),
       session_id: ctx.sessionId ?? null,
       duration_ms: r.durationMs,
     },
   });
 }
 
-type ActivityFilter = { sellerId?: string; sessionIds?: string[]; limit?: number; before?: Date };
+type ActivityFilter = { freelancerId?: string; sessionIds?: string[]; limit?: number; before?: Date };
 
 /** Timeline rows, newest first. Callers scope the filter to the signed-in actor. */
 export async function listActivity(filter: ActivityFilter) {
   const where: Prisma.AgentActionWhereInput = {};
-  if (filter.sellerId) where.seller_id = filter.sellerId;
+  if (filter.freelancerId) where.freelancer_id = filter.freelancerId;
   if (filter.sessionIds) where.session_id = { in: filter.sessionIds };
   if (filter.before) where.created_at = { lt: filter.before };
   return prisma.agentAction.findMany({
@@ -141,3 +161,4 @@ export async function listActivity(filter: ActivityFilter) {
     take: Math.min(filter.limit ?? 100, 500),
   });
 }
+export type ProposalAction = { id: string; tool: string; input: unknown };

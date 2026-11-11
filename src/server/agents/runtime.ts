@@ -31,6 +31,8 @@ export type AgentSpec = {
 
 export type RunEvent =
   | { type: "model_call"; call: number }
+  /** A piece of the reply text, as the model writes it. Only sent when a caller listens (the chat), never for background runs. */
+  | { type: "text_delta"; text: string }
   | { type: "tool_started"; id: string; name: string; input: unknown }
   | { type: "tool_finished"; id: string; name: string; ok: boolean; durationMs: number; error?: string };
 
@@ -196,7 +198,7 @@ export async function runAgent(input: RunInput): Promise<RunResult> {
         await recordToolCall(audit, { id, tool: name || "(unnamed)", input: args, status: "FAILED", error, durationMs: Date.now() - t0 });
         return finish(false, errorResponse("UNKNOWN_TOOL", error), { error });
       }
-      // .strict(): an extra key (say, an injected "seller_id") is an error, not silently dropped.
+      // .strict(): an extra key (say, an injected "freelancer_id") is an error, not silently dropped.
       const parsed = tool.input.strict().safeParse(args);
       if (!parsed.success) {
         const error = `Invalid input for ${tool.name}: ${describeIssues(parsed.error)}. Correct the input and call the tool again.`;
@@ -204,7 +206,7 @@ export async function runAgent(input: RunInput): Promise<RunResult> {
         return finish(false, errorResponse("INVALID_INPUT", error), { error });
       }
       if (tool.name === "handoff" && (handoff || input.handoffAllowed === false)) {
-        const error = "Only one handoff is allowed per message. Handle this request yourself or tell the seller which assistant to ask.";
+        const error = "Only one handoff is allowed per message. Handle this request yourself or tell the user which assistant to ask.";
         await recordToolCall(audit, { id, tool: tool.name, input: parsed.data, status: "FAILED", error, durationMs: Date.now() - t0 });
         return finish(false, errorResponse("HANDOFF_LIMIT", error), { error });
       }
@@ -216,7 +218,7 @@ export async function runAgent(input: RunInput): Promise<RunResult> {
           await recordToolCall(audit, { id, tool: tool.name, input: parsed.data, output, status: "SUCCEEDED", durationMs: Date.now() - t0 });
         }
         if (tool.kind === "proposal") pendingApprovals.push(output);
-        if (tool.name === "create_paypal_order") checkoutLinks.push(output);
+        if (tool.name === "create_milestone_payment") checkoutLinks.push(output);
         if (tool.name === "handoff") handoff = (output as { handoff: NonNullable<RunResult["handoff"]> }).handoff;
         return finish(true, { output }, { output });
       } catch (err) {
@@ -268,7 +270,10 @@ export async function runAgent(input: RunInput): Promise<RunResult> {
             include_reasoning: false,
             max_completion_tokens: maxOutputTokens,
           },
-          { signal: controller.signal },
+          {
+            signal: controller.signal,
+            onTextDelta: input.onEvent ? (text) => input.onEvent?.({ type: "text_delta", text }) : undefined,
+          },
         );
       } catch (err) {
         if (controller.signal.aborted) {

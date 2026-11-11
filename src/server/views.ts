@@ -1,6 +1,6 @@
 import type { AgentAction } from "@/generated/prisma/client";
 import { money } from "./domain/money";
-import type { listApprovals } from "./services/approvals";
+import type { listFreelancerApprovals } from "./services/gig/approvals";
 
 /** JSON shapes the UI renders. */
 
@@ -23,11 +23,41 @@ export function activityView(a: AgentAction) {
   };
 }
 
-type ApprovalRow = Awaited<ReturnType<typeof listApprovals>>[number];
+export function findingView(f: {
+  id: string;
+  agent: string;
+  type: string;
+  severity: string;
+  title: string;
+  body: string;
+  status: string;
+  session_id: string | null;
+  action_id: string | null;
+  last_seen_at: Date;
+  first_seen_at: Date;
+}) {
+  return {
+    id: f.id,
+    agent: f.agent,
+    type: f.type,
+    severity: f.severity,
+    title: f.title,
+    body: f.body,
+    status: f.status,
+    session_id: f.session_id,
+    action_id: f.action_id,
+    first_seen_at: f.first_seen_at.toISOString(),
+    last_seen_at: f.last_seen_at.toISOString(),
+  };
+}
 
-export function approvalView(a: ApprovalRow, locale: string) {
+type GigApprovalRow = Awaited<ReturnType<typeof listFreelancerApprovals>>[number];
+
+/** A freelancer's proposal: a milestone refund or a payout schedule. */
+export function gigApprovalView(a: GigApprovalRow, locale: string) {
   const output = (a.output ?? {}) as Record<string, unknown>;
   const { execution, ...proposal } = output;
+  const r = a.milestone_refund;
   return {
     id: a.id,
     status: a.status,
@@ -39,20 +69,23 @@ export function approvalView(a: ApprovalRow, locale: string) {
     decided_at: a.decided_at?.toISOString() ?? null,
     proposal,
     execution: execution ?? null,
-    refund: a.refund
+    refund: r
       ? {
-          id: a.refund.id,
-          order_id: a.refund.order_id,
-          buyer: a.refund.order.buyer.name,
-          status: a.refund.status,
-          reason: a.refund.reason,
-          amount: money(a.refund.amount_minor, a.refund.currency, locale),
-          seller_debit: a.refund.seller_debit_minor === null ? null : money(a.refund.seller_debit_minor, a.refund.currency, locale),
-          error: a.refund.error,
+          id: r.id,
+          milestone_id: r.milestone_id,
+          contract: r.milestone.contract.title,
+          milestone: `${r.milestone.position}. ${r.milestone.title}`,
+          client: r.milestone.contract.client.company_name ?? r.milestone.contract.client.name,
+          status: r.status,
+          reason: r.reason,
+          from_holding: r.from_holding,
+          amount: money(r.amount_minor, r.currency, locale),
+          freelancer_debit: r.freelancer_debit_minor === null ? null : money(r.freelancer_debit_minor, r.currency, locale),
+          error: r.error,
         }
       : null,
-    payouts: a.payout_schedule
-      ? a.payout_schedule.payouts.map((p) => ({
+    payouts: a.freelancer_payout_schedule
+      ? a.freelancer_payout_schedule.payouts.map((p) => ({
           id: p.id,
           status: p.status,
           date: p.scheduled_for.toISOString().slice(0, 10),

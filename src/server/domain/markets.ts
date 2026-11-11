@@ -1,6 +1,8 @@
+import { currencyExponent } from "./money";
+
 /**
- * The markets GlobalCart sells into. A market is a locale: it fixes the
- * listing language, the currency buyers pay in, units, and price rounding.
+ * The markets GlobalGig serves. A market is a locale: it fixes the
+ * service-page language, the currency clients pay in, and price rounding.
  */
 
 export type Rounding = "x99" | "ends9" | "tens";
@@ -46,4 +48,26 @@ export function getMarket(locale: string): Market {
   const market = MARKETS.get(locale);
   if (!market) throw new Error(`Unknown market locale: ${locale}`);
   return market;
+}
+
+/**
+ * Natural price points, always rounding UP so the margin is never reduced:
+ *  - x99:   12.34 -> 12.99, 12.99 -> 12.99
+ *  - ends9: whole units ending in 9 (MXN): 123.45 -> 129.00
+ *  - tens:  multiples of 10 (JPY): 1234 -> 1240
+ */
+export function roundUpToPricePoint(minor: number, rounding: Rounding, currency: string): number {
+  const unit = 10 ** currencyExponent(currency);
+  switch (rounding) {
+    case "x99":
+      return Math.ceil((minor + 1) / unit) * unit - 1;
+    case "ends9": {
+      const whole = Math.ceil(minor / unit);
+      return (Math.ceil((whole + 1) / 10) * 10 - 1) * unit;
+    }
+    case "tens": {
+      const step = 10 * unit;
+      return Math.ceil(minor / step) * step;
+    }
+  }
 }

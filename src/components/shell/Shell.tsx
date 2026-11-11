@@ -7,7 +7,6 @@ import { api } from "../api";
 import {
   IconBag,
   IconBox,
-  IconCart,
   IconCheck,
   IconClose,
   IconCoins,
@@ -19,43 +18,44 @@ import {
   IconPulse,
   IconReceipt,
   IconSpark,
-  IconTruck,
 } from "../icons";
+import { AssistantDock } from "../assistant/AssistantDock";
+import type { DockRole } from "../assistant/route-context";
+import { AssistantProvider } from "../assistant/AssistantContext";
 import { LanguagePicker, useT } from "../i18n/I18nProvider";
 import { LogoutButton } from "../LogoutButton";
 import { ThemeToggle } from "./ThemeToggle";
 
 const ICONS = {
   overview: IconOverview,
-  ledger: IconLedger,
   messages: IconMessages,
-  products: IconBox,
-  treasury: IconCoins,
-  operations: IconTruck,
+  services: IconBox,
+  quotes: IconJournal,
+  briefs: IconJournal,
+  projects: IconLedger,
+  earnings: IconCoins,
+  invoices: IconReceipt,
+  find: IconBag,
   approvals: IconCheck,
   activity: IconPulse,
   assistant: IconSpark,
-  journal: IconJournal,
-  shop: IconBag,
-  cart: IconCart,
-  orders: IconReceipt,
 };
 export type IconKey = keyof typeof ICONS;
-export type NavLink = { href: string; label: string; icon: IconKey; exact?: boolean; badge?: "unread" };
+export type NavLink = { href: string; label: string; icon: IconKey; exact?: boolean; badge?: "unread"; /** A fixed count (e.g. new findings), rendered like the unread badge. */ count?: number };
 
 function isActive(pathname: string, l: NavLink) {
   return l.exact ? pathname === l.href : pathname === l.href || pathname.startsWith(`${l.href}/`);
 }
 
 /** Polls the unread count so the badge moves when the other side replies. */
-function useUnread(initial: number) {
+function useUnread(initial: number, url: string) {
   const [unread, setUnread] = useState(initial);
   const pathname = usePathname();
   useEffect(() => {
     let alive = true;
     const tick = () => {
       if (document.visibilityState !== "visible") return;
-      void api<{ unread: number }>("/api/messages/unread")
+      void api<{ unread: number }>(url)
         .then((r) => alive && setUnread(r.unread))
         .catch(() => {});
     };
@@ -67,36 +67,37 @@ function useUnread(initial: number) {
       window.clearInterval(id);
       window.removeEventListener("gc:unread-changed", tick);
     };
-  }, [pathname]);
+  }, [pathname, url]);
   return unread;
 }
 
-function Badge({ n }: { n: number }) {
+function Badge({ n, label }: { n: number; label?: string }) {
   const t = useT();
   if (n <= 0) return null;
   return (
     <span className="ml-auto inline-flex min-w-6 items-center justify-center rounded-full bg-alert px-1.5 text-xs font-semibold leading-5 text-sheet">
       {n}
-      <span className="sr-only"> {t("shell.unread")}</span>
+      <span className="sr-only"> {label ?? t("shell.unread")}</span>
     </span>
   );
 }
 
 function Brand({ href }: { href: string }) {
   return (
-    <Link href={href} className="flex items-center gap-2.5 rounded-md" aria-label="GlobalCart, switch account">
+    <Link href={href} className="flex items-center gap-2.5 rounded-md" aria-label="GlobalGig, switch account">
       <svg viewBox="0 0 32 32" className="h-8 w-8 shrink-0" aria-hidden>
         <circle cx="16" cy="16" r="15" fill="#c99a2e" />
         <circle cx="16" cy="16" r="11" fill="none" stroke="#1a1514" strokeOpacity="0.55" strokeWidth="1.2" strokeDasharray="2 2.2" />
         <path d="M9 16h14M16 9c2.4 2 3.5 4.3 3.5 7s-1.1 5-3.5 7c-2.4-2-3.5-4.3-3.5-7s1.1-5 3.5-7z" fill="none" stroke="#1a1514" strokeWidth="1.8" />
       </svg>
-      <span className="font-display text-[1.35rem] font-bold leading-none tracking-[-0.02em] text-ink">GlobalCart</span>
+      <span className="font-display text-[1.35rem] font-bold leading-none tracking-[-0.02em] text-ink">GlobalGig</span>
     </Link>
   );
 }
 
 function LinkList({ links, unread, onNavigate, dense }: { links: NavLink[]; unread: number; onNavigate?: () => void; dense?: boolean }) {
   const pathname = usePathname();
+  const t = useT();
   return (
     <ul className={dense ? "flex items-center gap-0.5" : "flex flex-col gap-0.5"}>
       {links.map((l) => {
@@ -108,6 +109,8 @@ function LinkList({ links, unread, onNavigate, dense }: { links: NavLink[]; unre
               href={l.href}
               onClick={onNavigate}
               aria-current={active ? "page" : undefined}
+              aria-label={dense ? l.label : undefined}
+              title={dense ? l.label : undefined}
               className={[
                 `relative flex min-h-11 items-center rounded-md text-[0.94rem] whitespace-nowrap transition-colors ${dense ? "gap-2 px-2.5" : "gap-3 px-3"}`,
                 active ? "bg-accent font-semibold text-sheet shadow-[0_1px_0_rgb(0_0_0/0.08)]" : "text-ink-2 hover:bg-sheet-2 hover:text-ink",
@@ -115,8 +118,10 @@ function LinkList({ links, unread, onNavigate, dense }: { links: NavLink[]; unre
             >
               {active && !dense && <span className="absolute inset-y-1.5 -left-3 w-1 rounded-r bg-accent" aria-hidden />}
               <Icon />
-              <span>{l.label}</span>
+              {/* In the top bar the words give way to icons when the bar is narrow (e.g. with the assistant panel open). */}
+              <span className={dense ? "hidden @min-[1100px]:inline" : undefined}>{l.label}</span>
               {l.badge === "unread" && <Badge n={unread} />}
+              {l.count ? <Badge n={l.count} label={t("find.new")} /> : null}
             </Link>
           </li>
         );
@@ -135,7 +140,7 @@ function Who({ name, sub }: { name: string; sub: string }) {
 }
 
 /**
- * App frame. Sellers get a left rail (dense back office); buyers get a top bar.
+ * App frame. Freelancers get a left rail (dense back office); clients get a top bar.
  * Below md both collapse to a top bar with a drawer.
  */
 export function Shell({
@@ -145,6 +150,7 @@ export function Shell({
   sub,
   initialUnread,
   tools,
+  assistant,
   children,
 }: {
   variant: "rail" | "bar";
@@ -153,9 +159,11 @@ export function Shell({
   sub: string;
   initialUnread: number;
   tools?: React.ReactNode;
+  /** The assistant side panel: who it is for, and for clients the PayPal client id and market their chat uses. */
+  assistant: { role: DockRole; paypalClientId?: string | null; market?: string };
   children: React.ReactNode;
 }) {
-  const unread = useUnread(initialUnread);
+  const unread = useUnread(initialUnread, "/api/threads?count=unread");
   const t = useT();
   const [open, setOpen] = useState(false);
   useEffect(() => {
@@ -208,7 +216,8 @@ export function Shell({
 
   if (variant === "rail") {
     return (
-      <div className="min-h-dvh md:grid md:grid-cols-[15rem_minmax(0,1fr)]">
+      <AssistantProvider role={assistant.role} paypalClientId={assistant.paypalClientId ?? null} market={assistant.market}>
+      <div className="dock-grid min-h-dvh md:grid md:grid-cols-[15rem_minmax(0,1fr)] lg:grid-cols-[15rem_minmax(0,1fr)_min(var(--dock-w),50vw)]">
         {mobileBar}
         {drawer}
         <aside className="sticky top-0 hidden h-dvh flex-col gap-6 border-r border-rule bg-sheet px-3 py-5 md:flex">
@@ -219,7 +228,7 @@ export function Shell({
             </div>
             <LanguagePicker compact />
           </div>
-          <nav aria-label="Seller" className="flex-1 overflow-y-auto">
+          <nav aria-label="Main" className="flex-1 overflow-y-auto">
             <LinkList links={links} unread={unread} />
           </nav>
           <div className="flex flex-col gap-1 border-t border-rule px-2 pt-3">
@@ -229,33 +238,41 @@ export function Shell({
             </div>
           </div>
         </aside>
-        <main className="min-w-0 px-4 py-6 md:px-8 md:py-8">{children}</main>
+        {/* The content area is the @container the cq-* layout variants measure (see globals.css). */}
+        <main className="@container min-w-0 px-4 py-6 max-lg:pb-24 md:px-8 md:py-8">{children}</main>
+        <AssistantDock chrome={240} />
       </div>
+      </AssistantProvider>
     );
   }
 
   return (
-    <div className="min-h-dvh">
-      {mobileBar}
-      {drawer}
-      <header className="sticky top-0 z-30 hidden border-b border-rule bg-sheet/95 backdrop-blur md:block">
-        <div className="mx-auto flex max-w-7xl items-center gap-4 px-6 py-2">
-          <Brand href="/login" />
-          <nav aria-label="Buyer" className="min-w-0 flex-1">
-            <LinkList links={links} unread={unread} dense />
-          </nav>
-          {tools}
-          <div className="flex items-center gap-2">
-            <span className="hidden xl:block">
-              <Who name={who} sub={sub} />
-            </span>
-            <LanguagePicker compact />
-            <ThemeToggle compact />
-            <LogoutButton />
-          </div>
+    <AssistantProvider role={assistant.role} paypalClientId={assistant.paypalClientId ?? null} market={assistant.market}>
+      <div className="dock-grid min-h-dvh lg:grid lg:grid-cols-[minmax(0,1fr)_min(var(--dock-w),50vw)]">
+        <div className="min-w-0">
+          {mobileBar}
+          {drawer}
+          <header className="sticky top-0 z-30 hidden border-b border-rule bg-sheet/95 backdrop-blur md:block">
+            <div className="@container mx-auto flex max-w-7xl items-center gap-4 px-6 py-2">
+              <Brand href="/login" />
+              <nav aria-label="Main" className="min-w-0 flex-1 overflow-x-auto">
+                <LinkList links={links} unread={unread} dense />
+              </nav>
+              {tools}
+              <div className="flex items-center gap-2">
+                <span className="hidden @min-[1180px]:block">
+                  <Who name={who} sub={sub} />
+                </span>
+                <LanguagePicker compact />
+                <ThemeToggle compact />
+                <LogoutButton />
+              </div>
+            </div>
+          </header>
+          <main className="@container mx-auto max-w-7xl px-4 py-6 max-lg:pb-24 md:px-6 md:py-8">{children}</main>
         </div>
-      </header>
-      <main className="mx-auto max-w-7xl px-4 py-6 md:px-6 md:py-8">{children}</main>
-    </div>
+        <AssistantDock chrome={0} />
+      </div>
+    </AssistantProvider>
   );
 }
