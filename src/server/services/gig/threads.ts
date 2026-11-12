@@ -124,19 +124,16 @@ export async function threadForContract(o: GigOwner, contractId: string, now = n
   const existing = await prisma.thread.findFirst({ where: { contract_id: c.id } });
   if (existing) return existing;
   return prisma.thread.create({
-    data: { freelancer_id: c.freelancer_id, client_id: c.client_id, contract_id: c.id, quote_id: c.quote_id, service_id: c.service_id, subject: c.title.slice(0, 140), last_message_at: now },
+    data: { freelancer_id: c.freelancer_id, client_id: c.client_id, contract_id: c.id, quote_id: c.quote_id, subject: c.title.slice(0, 140), last_message_at: now },
   });
 }
 
-/** A client opens a thread about a published service (the "Ask the freelancer" button). */
-export async function startThread(o: GigOwner, input: { servicePageId: string; body: string }, now = new Date()) {
+/** A client writes to a freelancer about their proposal on a project (finds or opens the thread for that proposal). */
+export async function startThread(o: GigOwner, input: { quoteId: string; body: string }, now = new Date()) {
   if (o.type !== "CLIENT") throw new AppError("FORBIDDEN", "Only clients can start a conversation.");
-  const page = await prisma.servicePage.findFirst({ where: { id: input.servicePageId, status: "PUBLISHED" }, select: { service_id: true, freelancer_id: true, title: true } });
-  if (!page) throw notFound("Service");
-  const existing = await prisma.thread.findFirst({
-    where: { client_id: o.clientId, freelancer_id: page.freelancer_id, service_id: page.service_id, contract_id: null, status: "OPEN" },
-    select: { id: true },
-  });
+  const quote = await prisma.quote.findFirst({ where: { id: input.quoteId, client_id: o.clientId, brief_id: { not: null } }, include: { brief: { select: { title: true } } } });
+  if (!quote) throw notFound("Proposal");
+  const existing = await prisma.thread.findFirst({ where: { quote_id: quote.id, contract_id: null, status: "OPEN" }, select: { id: true } });
   if (existing) {
     await sendThreadMessage(o, existing.id, input.body, [], now);
     return { id: existing.id };
@@ -146,10 +143,10 @@ export async function startThread(o: GigOwner, input: { servicePageId: string; b
   if (text.length > MESSAGE_MAX) throw new AppError("INVALID_INPUT", `Messages are limited to ${MESSAGE_MAX} characters.`);
   const t = await prisma.thread.create({
     data: {
-      freelancer_id: page.freelancer_id,
+      freelancer_id: quote.freelancer_id,
       client_id: o.clientId,
-      service_id: page.service_id,
-      subject: `Question about ${page.title}`.slice(0, 140),
+      quote_id: quote.id,
+      subject: `About your proposal: ${quote.brief?.title ?? "project"}`.slice(0, 140),
       last_message_at: now,
       freelancer_unread: 1,
       messages: { create: { sender: "CLIENT", body: text, body_locale: o.locale, created_at: now } },

@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { SaleContext } from "@/server/domain/fees";
-import { priceStats } from "@/server/domain/market-prices";
-import { chooseRate, estimatedNet, FLOOR_PLUS_BPS, floorPrice, scaledAnchor } from "@/server/domain/rates";
+import { chooseRate, estimatedNet, FLOOR_PLUS_BPS, floorPrice } from "@/server/domain/rates";
 
 const de: SaleContext = { currency: "EUR", marketCountry: "DE", freelancerCountry: "IN", freelancerCurrency: "USD", platformBps: 500 };
 const jp: SaleContext = { currency: "JPY", marketCountry: "JP", freelancerCountry: "JP", freelancerCurrency: "JPY", platformBps: 500 };
@@ -32,32 +31,19 @@ describe("chooseRate", () => {
   const base = { rounding: "x99" as const, currency: "EUR" };
 
   it("never goes below the floor", () => {
-    expect(chooseRate({ ...base, floor: 20_099, anchor: 15_000, target: null })).toEqual({ price: 20_099, strategy: "floor", raisedToFloor: true });
-    expect(chooseRate({ ...base, floor: 20_099, anchor: null, target: 9_000 })).toEqual({ price: 20_099, strategy: "floor", raisedToFloor: true });
-    for (let anchor = 1; anchor < 60_000; anchor += 997) {
-      expect(chooseRate({ ...base, floor: 20_099, anchor, target: null }).price).toBeGreaterThanOrEqual(20_099);
+    expect(chooseRate({ ...base, floor: 20_099, target: 9_000 })).toEqual({ price: 20_099, strategy: "floor", raisedToFloor: true });
+    for (let target = 1; target < 60_000; target += 997) {
+      expect(chooseRate({ ...base, floor: 20_099, target }).price).toBeGreaterThanOrEqual(20_099);
     }
   });
 
-  it("aims at the market anchor or the target when above the floor", () => {
-    expect(chooseRate({ ...base, floor: 10_099, anchor: 24_550, target: null })).toEqual({ price: 24_599, strategy: "market", raisedToFloor: false });
-    expect(chooseRate({ ...base, floor: 10_099, anchor: 24_550, target: 30_000 })).toEqual({ price: 30_099, strategy: "target", raisedToFloor: false });
+  it("aims at the target when it is above the floor", () => {
+    expect(chooseRate({ ...base, floor: 10_099, target: 30_000 })).toEqual({ price: 30_099, strategy: "target", raisedToFloor: false });
   });
 
-  it("adds a margin over the floor when there is no market data", () => {
-    const r = chooseRate({ ...base, floor: 10_099, anchor: null, target: null });
+  it("adds a margin over the floor when there is no target", () => {
+    const r = chooseRate({ ...base, floor: 10_099, target: null });
     expect(r.strategy).toBe("floor_plus");
     expect(r.price).toBeGreaterThanOrEqual(Math.round(10_099 * (1 + FLOOR_PLUS_BPS / 10_000)));
-  });
-});
-
-describe("scaledAnchor", () => {
-  const stats = priceStats([20_000, 30_000, 40_000, 50_000, 60_000])!;
-  it("scales the Standard-sized market price by package hours", () => {
-    expect(scaledAnchor(stats, "market", 8, 8)).toBe(40_000);
-    expect(scaledAnchor(stats, "market", 4, 8)).toBe(20_000);
-    expect(scaledAnchor(stats, "premium", 16, 8)).toBe(100_000);
-    expect(scaledAnchor(stats, "competitive", 8, 8)).toBe(30_000);
-    expect(() => scaledAnchor(stats, "market", 0, 8)).toThrow();
   });
 });

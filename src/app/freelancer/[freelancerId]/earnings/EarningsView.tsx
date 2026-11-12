@@ -5,7 +5,6 @@ import { useCallback, useEffect, useState } from "react";
 import { api, type Money } from "@/components/api";
 import { usePageAssistant } from "@/components/assistant/AssistantContext";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
-import { GigFindingsFeed } from "@/components/gig/GigFindingsFeed";
 import { GigLedgerGrid, parseGigLedgerTab } from "@/components/gig/GigLedgerGrid";
 import { AutoPayoutToggle } from "@/components/gig/freelancer/AutoPayoutToggle";
 import { errText, Notice, primaryBtn, secondaryBtn } from "@/components/gig/freelancer/shared";
@@ -40,8 +39,8 @@ export function EarningsView({ period, tab, autoProposals }: { period: Dashboard
   useEffect(() => {
     void load();
   }, [load]);
-  // The panel talks to the Treasury agent here; reload after it replies (it may have drafted a payout for approval).
-  usePageAssistant({ agent: "TREASURY", onResult: () => void load() });
+  // The panel talks to the Freelancer Agent here; reload after it replies (it may have drafted a payout for approval).
+  usePageAssistant({ agent: "PROFILE", onResult: () => void load() });
 
   async function payOut() {
     const b = confirming;
@@ -121,8 +120,6 @@ export function EarningsView({ period, tab, autoProposals }: { period: Dashboard
       </section>
 
       <AutoPayoutToggle initial={autoProposals} />
-
-      <GigFindingsFeed agent="TREASURY" />
 
       <GigLedgerGrid period={period} tab={parseGigLedgerTab(tab)} headingLevel={2} />
 

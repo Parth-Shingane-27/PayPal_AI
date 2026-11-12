@@ -1,11 +1,10 @@
 import { DelayedError, type Job, Queue, Worker } from "bullmq";
 import { prisma } from "@/server/db";
 import { proactiveEnabled } from "@/server/config";
-import { enqueueGigEmbedding, type EmbeddingJob, type PayoutJob, QUEUE_NAMES, queuePrefix, redisConnection, scheduleDailyWatch, schedulePayoutJob, type WatchJob, type WebhookJob } from "@/server/queue";
+import { type PayoutJob, QUEUE_NAMES, queuePrefix, redisConnection, scheduleDailyWatch, schedulePayoutJob, type WatchJob, type WebhookJob } from "@/server/queue";
 import { freelancerIds, runWatch } from "@/server/proactive/watcher";
 import { sweepAutoReleases } from "@/server/services/gig/milestones";
 import { freelancerPayoutsNeedingJobs, runFreelancerPayout } from "@/server/services/gig/payouts";
-import { embedFreelancer, embedServicePage, gigEmbeddingsMissing } from "@/server/services/gig/search";
 import { processWebhookEvent } from "@/server/services/webhooks";
 
 const PAYOUT_POLL_MS = 60_000;
@@ -19,11 +18,6 @@ export async function webhookProcessor(job: Job<WebhookJob>) {
 
 export async function watchProcessor(job: Job<WatchJob>) {
   return runWatch(job.data.freelancerId);
-}
-
-async function embeddingProcessor(job: Job<EmbeddingJob>) {
-  const d = job.data;
-  return d.kind === "service_page" ? embedServicePage(d.id) : embedFreelancer(d.id);
 }
 
 /**
@@ -63,7 +57,6 @@ export function startWorkers() {
   const opts = { connection: redisConnection(), prefix: queuePrefix() };
   const workers = [
     new Worker<WebhookJob>(QUEUE_NAMES.webhooks, webhookProcessor, { ...opts, concurrency: 5 }),
-    new Worker<EmbeddingJob>(QUEUE_NAMES.embeddings, embeddingProcessor, { ...opts, concurrency: 2 }),
     new Worker<PayoutJob>(QUEUE_NAMES.payouts, payoutProcessor, { ...opts, concurrency: 2 }),
     new Worker<WatchJob>(QUEUE_NAMES.watch, watchProcessor, { ...opts, concurrency: 1 }),
   ];
@@ -85,19 +78,6 @@ export function startWorkers() {
       .catch((err: unknown) => console.error("auto-release sweep failed", err));
   void autoRelease();
   const releaseTimer = setInterval(autoRelease, AUTO_RELEASE_SWEEP_MS);
-  // Pages published while embeddings could not run get queued again on boot.
-  if (!process.env.VOYAGE_API_KEY?.trim()) {
-    console.warn("VOYAGE_API_KEY is not set: skipping embedding backfill. Add it to .env and restart the worker.");
-  } else {
-    void Promise.resolve()
-      .then(async () => {
-        const gig = await gigEmbeddingsMissing();
-        for (const t of gig) await enqueueGigEmbedding(t);
-        if (gig.length) console.log(`queued ${gig.length} service page / freelancer embedding(s)`);
-      })
-      .catch((err: unknown) => console.error("embedding backfill failed", err));
-  }
-
   // Proactive agents: make sure every freelancer has a daily check.
   if (proactiveEnabled()) {
     void freelancerIds()

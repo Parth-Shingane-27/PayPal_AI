@@ -1,14 +1,20 @@
 "use client";
 
-import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { useId, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { useCallback, useEffect, useId, useState } from "react";
 import { api, decimalOf, type Money } from "../../api";
+import { usePageAssistant } from "../../assistant/AssistantContext";
 import { ConfirmDialog } from "../../ConfirmDialog";
 import { useI18n } from "../../i18n/I18nProvider";
 import { useGigBase } from "../use-gig-base";
+import { PlanEditor } from "./PlanEditor";
+import { languageName } from "./format";
 
-/** The client's briefs: write, edit and close them (POST/PUT/DELETE /api/briefs). */
+/**
+ * The client's projects: write a draft, post it, see and choose between the
+ * proposals on it, and close it (POST/PUT/DELETE /api/briefs, POST
+ * /api/briefs/<id>/publish, GET /api/briefs/<id>/proposals).
+ */
 
 export type BriefRow = {
   brief_id: string;
@@ -133,12 +139,143 @@ function BriefForm({ brief, currency, onDone, onCancel }: { brief?: BriefRow; cu
   );
 }
 
-export function BriefsView({ briefs, currency }: { briefs: BriefRow[]; currency: string }) {
+type Proposal = {
+  quote_id: string;
+  status: string;
+  total: Money | null;
+  delivery_days: number | null;
+  revisions: number | null;
+  scope: string | null;
+  message: string | null;
+  expires_at: string | null;
+  freelancer: { name: string; headline: string; skills: string[]; languages: string[]; country: string };
+};
+
+/** The proposals on one project: compare, plan milestones on one (POST /api/contracts) or decline it. */
+function Proposals({ briefId, onChanged }: { briefId: string; onChanged: (message: string) => void }) {
   const { t, locale } = useI18n();
   const base = useGigBase();
   const router = useRouter();
-  const [creating, setCreating] = useState(false);
+  const [rows, setRows] = useState<Proposal[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [planning, setPlanning] = useState<string | null>(null);
+  const [declining, setDeclining] = useState<Proposal | null>(null);
+  const [busy, setBusy] = useState(false);
+  const date = (iso: string) => new Intl.DateTimeFormat(locale, { dateStyle: "medium", timeZone: "UTC" }).format(new Date(iso));
+
+  const load = useCallback(
+    () =>
+      api<{ proposals: Proposal[] }>(`/api/briefs/${briefId}/proposals`).then(
+        (r) => {
+          setRows(r.proposals);
+          setError(null);
+        },
+        (e: unknown) => setError(e instanceof Error ? e.message : t("cl.err.generic")),
+      ),
+    [briefId, t],
+  );
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  async function decline() {
+    if (!declining) return;
+    setBusy(true);
+    try {
+      await api(`/api/quotes/${declining.quote_id}`, { method: "DELETE" });
+      onChanged(t("cl.quote.declined"));
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t("cl.err.generic"));
+    } finally {
+      setDeclining(null);
+      setBusy(false);
+    }
+  }
+
+  if (rows === null) return <p className="text-sm text-ink-3">{error ?? t("pj.post.loading")}</p>;
+  if (rows.length === 0) return <p className="text-sm text-ink-3">{t("pj.post.none")}</p>;
+
+  return (
+    <div className="flex flex-col gap-3">
+      {error && (
+        <p role="alert" className="rounded-md bg-alert-soft px-3 py-2 text-sm text-alert-ink">
+          {error}
+        </p>
+      )}
+      <ul className="flex flex-col gap-3">
+        {rows.map((q) => (
+          <li key={q.quote_id} className="rounded-[10px] border border-rule bg-sheet-2 p-4">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div className="min-w-0 flex-1">
+                <p className="flex flex-wrap items-center gap-2">
+                  <span className="font-display text-lg font-semibold">{q.freelancer.name}</span>
+                  <span className="inline-flex items-center rounded-[3px] bg-sheet px-2 py-0.5 text-xs font-semibold text-ink-2">{t(`cl.quote.status.${q.status as "SENT"}`)}</span>
+                </p>
+                {q.freelancer.headline && <p className="text-sm text-ink-3">{q.freelancer.headline}</p>}
+                {q.freelancer.languages.length > 0 && <p className="text-sm text-ink-3">{q.freelancer.languages.map((l) => languageName(l, locale)).join(", ")}</p>}
+              </div>
+              {q.total && <p className="num font-display text-2xl font-semibold">{q.total.display}</p>}
+            </div>
+            <dl className="mt-3 grid gap-x-6 gap-y-1 text-sm bq-sm:grid-cols-[auto_minmax(0,1fr)]">
+              <dt className="text-ink-3">{t("cl.quote.delivery")}</dt>
+              <dd>{t("cl.quote.days", { n: q.delivery_days ?? 0 })}</dd>
+              <dt className="text-ink-3">{t("cl.quote.revisions")}</dt>
+              <dd className="num">{q.revisions ?? 0}</dd>
+              {q.expires_at && (
+                <>
+                  <dt className="text-ink-3">{t("cl.quote.validUntil")}</dt>
+                  <dd>{date(q.expires_at)}</dd>
+                </>
+              )}
+            </dl>
+            {q.scope && (
+              <div className="mt-3">
+                <h3 className="text-sm font-semibold">{t("cl.quote.scope")}</h3>
+                <p className="mt-1 text-sm whitespace-pre-line text-ink-2">{q.scope}</p>
+              </div>
+            )}
+            {q.message && (
+              <blockquote className="mt-3 border-l-2 border-accent pl-3 text-sm text-ink-2">
+                <p className="text-xs font-semibold text-ink-3">{t("cl.quote.note", { name: q.freelancer.name })}</p>
+                <p className="mt-1 whitespace-pre-line">{q.message}</p>
+              </blockquote>
+            )}
+            {q.status === "SENT" &&
+              q.total &&
+              (planning === q.quote_id ? (
+                <div className="mt-3">
+                  <PlanEditor total={q.total} source={{ quote_id: q.quote_id }} onCreated={(id) => router.push(`${base}/projects/${id}`)} onCancel={() => setPlanning(null)} />
+                </div>
+              ) : (
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <button type="button" onClick={() => setPlanning(q.quote_id)} className="inline-flex min-h-11 items-center rounded-md bg-accent px-5 text-sm font-semibold text-sheet">
+                    {t("cl.quote.plan")}
+                  </button>
+                  <button type="button" onClick={() => setDeclining(q)} className="inline-flex min-h-11 items-center rounded-md border border-rule-strong px-4 text-sm font-medium text-ink-2 hover:border-alert hover:text-alert-ink">
+                    {t("cl.quote.decline")}
+                  </button>
+                </div>
+              ))}
+          </li>
+        ))}
+      </ul>
+      <ConfirmDialog open={declining !== null} title={t("cl.quote.declineTitle")} confirmLabel={t("cl.quote.decline")} cancelLabel={t("cl.common.keep")} busy={busy} onConfirm={decline} onCancel={() => setDeclining(null)}>
+        <p>{t("cl.quote.declineBody", { name: declining?.freelancer.name ?? t("cl.quote.freelancer") })}</p>
+      </ConfirmDialog>
+    </div>
+  );
+}
+
+export function BriefsView({ briefs, currency }: { briefs: BriefRow[]; currency: string }) {
+  const { t, locale } = useI18n();
+  const router = useRouter();
+  const params = useSearchParams();
+  // The Client Agent can save a draft project; refresh the list after it replies.
+  usePageAssistant({ agent: "HIRING", onResult: () => router.refresh() });
+  const [creating, setCreating] = useState(params.get("new") === "1");
   const [editing, setEditing] = useState<string | null>(null);
+  const [shown, setShown] = useState<string | null>(params.get("open"));
   const [closing, setClosing] = useState<BriefRow | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -151,6 +288,19 @@ export function BriefsView({ briefs, currency }: { briefs: BriefRow[]; currency:
     setNotice(msg);
     router.refresh();
   };
+
+  async function publish(b: BriefRow) {
+    setBusy(true);
+    setError(null);
+    try {
+      await api(`/api/briefs/${b.brief_id}/publish`, { method: "POST" });
+      done(t("pj.post.published"));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t("cl.err.generic"));
+    } finally {
+      setBusy(false);
+    }
+  }
 
   async function close() {
     if (!closing) return;
@@ -236,12 +386,15 @@ export function BriefsView({ briefs, currency }: { briefs: BriefRow[]; currency:
                     ))}
                   </ul>
                 )}
+                {b.status === "DRAFT" && <p className="mt-3 text-sm text-ink-3">{t("pj.post.draftHint")}</p>}
                 <div className="mt-4 flex flex-wrap gap-2">
+                  {b.status === "DRAFT" && (
+                    <button type="button" disabled={busy} onClick={() => void publish(b)} className="inline-flex min-h-11 items-center rounded-md bg-accent px-5 text-sm font-semibold text-sheet disabled:opacity-50">
+                      {t("pj.post.publish")}
+                    </button>
+                  )}
                   {b.status !== "CLOSED" && (
                     <>
-                      <Link href={`${base}/find?q=${encodeURIComponent(b.title)}`} className="inline-flex min-h-11 items-center rounded-md bg-ink px-4 text-sm font-semibold text-sheet">
-                        {t("cl.brief.findFor")}
-                      </Link>
                       <button
                         type="button"
                         onClick={() => (setEditing(b.brief_id), setCreating(false), setNotice(null))}
@@ -255,11 +408,21 @@ export function BriefsView({ briefs, currency }: { briefs: BriefRow[]; currency:
                     </>
                   )}
                   {b.quotes > 0 && (
-                    <Link href={`${base}/quotes`} className="inline-flex min-h-11 items-center px-2 text-sm text-accent hover:underline">
-                      {t("cl.find.seeQuotes")}
-                    </Link>
+                    <button
+                      type="button"
+                      aria-expanded={shown === b.brief_id}
+                      onClick={() => setShown(shown === b.brief_id ? null : b.brief_id)}
+                      className="inline-flex min-h-11 items-center px-2 text-sm font-medium text-accent hover:underline"
+                    >
+                      {shown === b.brief_id ? t("pj.post.hide") : t("pj.post.show", { n: b.quotes })}
+                    </button>
                   )}
                 </div>
+                {shown === b.brief_id && (
+                  <div className="mt-4 border-t border-dashed border-rule-strong pt-4">
+                    <Proposals briefId={b.brief_id} onChanged={(m) => done(m)} />
+                  </div>
+                )}
               </li>
             ),
           )}

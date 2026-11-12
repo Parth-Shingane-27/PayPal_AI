@@ -271,7 +271,15 @@ export async function markFunded(tx: Tx, milestoneId: string, now = new Date()) 
   const applied = await applyTransition(tx, m.id, "FUND", SYSTEM_ACTOR, { now, extra: { funded_at: now } });
   await syncContractStatus(tx, m.contract_id, now);
   const contract = await tx.contract.findUniqueOrThrow({ where: { id: m.contract_id } });
-  if (contract.quote_id) await tx.quote.updateMany({ where: { id: contract.quote_id, status: "SENT" }, data: { status: "ACCEPTED", decided_at: now } });
+  if (contract.quote_id) {
+    const accepted = await tx.quote.updateMany({ where: { id: contract.quote_id, status: "SENT" }, data: { status: "ACCEPTED", decided_at: now } });
+    // The first funded milestone settles the project: close it and turn the other proposals down.
+    const quote = accepted.count > 0 ? await tx.quote.findUnique({ where: { id: contract.quote_id }, select: { brief_id: true } }) : null;
+    if (quote?.brief_id) {
+      await tx.quote.updateMany({ where: { brief_id: quote.brief_id, id: { not: contract.quote_id }, status: "SENT" }, data: { status: "DECLINED", decided_at: now } });
+      await tx.brief.updateMany({ where: { id: quote.brief_id, status: { not: "CLOSED" } }, data: { status: "CLOSED" } });
+    }
+  }
   return applied.milestone;
 }
 

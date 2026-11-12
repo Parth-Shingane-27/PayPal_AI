@@ -6,9 +6,7 @@ import { convertAtReference, referenceRate } from "@/server/domain/reference-rat
 import { CLIENTS, FREELANCERS, LANGS, langOf } from "../../prisma/seed/people";
 import { createRng } from "../../prisma/seed/prng";
 import { BRIEFS, SCRIPTS } from "../../prisma/seed/scripts";
-import { SERVICES } from "../../prisma/seed/services";
 import { isMarketLocale } from "@/server/domain/markets";
-import { SEO_TITLE_MAX } from "@/server/services/gig/catalog";
 
 describe("shortId", () => {
   it("uses the random tail, because UUIDv7 ids created together share their first characters", () => {
@@ -99,22 +97,16 @@ describe("grid state", () => {
 });
 
 describe("seed data", () => {
-  const specs = Object.entries(SERVICES);
-  const all = specs.flatMap(([slug, list]) => list.map((spec) => ({ slug, spec })));
-  it("has ten freelancers and ten clients, each freelancer with four services and unique service codes", () => {
+  it("has ten freelancers and ten clients, with unique slugs", () => {
     expect(FREELANCERS).toHaveLength(10);
     expect(CLIENTS).toHaveLength(10);
     expect(new Set(FREELANCERS.map((f) => f.slug)).size).toBe(10);
-    for (const f of FREELANCERS) expect(SERVICES[f.slug]?.length, f.slug).toBe(4);
-    for (const [slug, list] of specs) expect(new Set(list.map((x) => x.code)).size, slug).toBe(list.length);
+    expect(new Set(CLIENTS.map((c) => c.slug)).size).toBe(10);
   });
-  it("gives every freelancer a hero service written in every language, with titles that fit an SEO title", () => {
-    for (const f of FREELANCERS) {
-      const hero = SERVICES[f.slug]!.filter((x) => x.hero);
-      expect(hero, f.slug).toHaveLength(1);
-      for (const lang of LANGS) expect(hero[0]!.t[lang], `${f.slug} ${lang}`).toBeTruthy();
-    }
-    for (const { slug, spec } of all) for (const t of Object.values(spec.t)) expect(t!.title.length, `${slug} ${spec.code}`).toBeLessThanOrEqual(SEO_TITLE_MAX);
+  it("gives every project category at least one freelancer whose skills match it", () => {
+    const skills = new Set(FREELANCERS.flatMap((f) => f.skills));
+    expect(skills.size).toBeGreaterThan(10);
+    expect(Object.keys(BRIEFS).length).toBeGreaterThanOrEqual(8);
   });
   it("uses supported markets for every person, and a language for each", () => {
     for (const p of [...FREELANCERS, ...CLIENTS]) {

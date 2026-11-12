@@ -1,5 +1,4 @@
 import { estimateSaleFees, type SaleContext } from "./fees";
-import { type PriceStats, anchorFor, type Positioning } from "./market-prices";
 import { type Rounding, roundUpToPricePoint } from "./markets";
 
 /**
@@ -28,36 +27,26 @@ export function floorPrice(netFloorMinor: number, ctx: SaleContext, rounding: Ro
   return gross;
 }
 
-/** A market price for one item (package or hour), scaled from the researched anchor by hours. */
-export function scaledAnchor(stats: PriceStats, positioning: Positioning, hours: number, anchorHours: number): number {
-  if (hours <= 0 || anchorHours <= 0) throw new Error("Hours must be positive.");
-  return Math.round((anchorFor(stats, positioning) * hours) / anchorHours);
-}
-
 export type RateChoice = {
   price: number;
   /** Where the price came from. */
-  strategy: "market" | "floor" | "floor_plus" | "target";
+  strategy: "floor" | "floor_plus" | "target";
   /** The market or target price was below the floor and was raised to it. */
   raisedToFloor: boolean;
 };
 
-/** Without research or positioning, a modest margin over the floor. */
+/** Without a target price, a modest margin over the floor. */
 export const FLOOR_PLUS_BPS = 2_000;
 
 /**
- * The suggested price for one item: the target or market anchor, never below
- * the floor; with neither, the floor plus FLOOR_PLUS_BPS.
+ * The suggested price for one item: the target, never below the floor; with
+ * no target, the floor plus FLOOR_PLUS_BPS.
  */
-export function chooseRate(input: { floor: number; anchor: number | null; target: number | null; rounding: Rounding; currency: string }): RateChoice {
+export function chooseRate(input: { floor: number; target: number | null; rounding: Rounding; currency: string }): RateChoice {
   const round = (m: number) => roundUpToPricePoint(Math.max(1, m), input.rounding, input.currency);
   if (input.target !== null) {
     const t = round(input.target);
     return t >= input.floor ? { price: t, strategy: "target", raisedToFloor: false } : { price: input.floor, strategy: "floor", raisedToFloor: true };
-  }
-  if (input.anchor !== null) {
-    const a = round(input.anchor);
-    return a >= input.floor ? { price: a, strategy: "market", raisedToFloor: false } : { price: input.floor, strategy: "floor", raisedToFloor: true };
   }
   return { price: round(Math.round(input.floor * (1 + FLOOR_PLUS_BPS / 10_000))), strategy: "floor_plus", raisedToFloor: false };
 }

@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import type { ChatCompletion, ModelApi } from "@/server/agents/model";
 import { type AgentSpec, type RunEvent, runAgent } from "@/server/agents/runtime";
 import { createSession, historyOf } from "@/server/agents/sessions";
-import { TREASURY_TOOLS } from "@/server/agents/treasury/tools";
+import { PROFILE_TOOLS } from "@/server/agents/profile/tools";
 import { prisma } from "@/server/db";
 import { getMarket } from "@/server/domain/markets";
 import { makeFreelancer, resetDb } from "../helpers/db";
@@ -10,7 +10,7 @@ import { call, reply, text } from "../helpers/fake-model";
 
 beforeEach(resetDb);
 
-const SPEC: AgentSpec = { name: "TREASURY", system: "You are a test agent.", tools: TREASURY_TOOLS, maxModelCalls: 10, timeoutMs: 30_000 };
+const SPEC: AgentSpec = { name: "PROFILE", system: "You are a test agent.", tools: PROFILE_TOOLS, maxModelCalls: 10, timeoutMs: 30_000 };
 const CONTEXT = "<session_context>Today is 2026-11-04.</session_context>";
 
 type Step = { deltas: string[]; response: ChatCompletion };
@@ -33,7 +33,7 @@ function streamingModel(steps: Step[]) {
 async function run(model: ModelApi, onEvent?: (e: RunEvent) => void) {
   const freelancer = await makeFreelancer();
   const owner = { type: "FREELANCER" as const, freelancerId: freelancer.id };
-  const session = await createSession(owner, "TREASURY", "en-US");
+  const session = await createSession(owner, "PROFILE", "en-US");
   const result = await runAgent({
     sessionId: session.id,
     owner,

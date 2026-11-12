@@ -3,12 +3,12 @@
 import { usePathname } from "next/navigation";
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { setDockOpen, setOverlayOpen } from "./dock-store";
-import { AGENTS_FOR, chatStorageKey, type DockAgent, defaultAgentFor, serviceIdFor, type DockRole } from "./route-context";
+import { AGENTS_FOR, chatStorageKey, type DockAgent, defaultAgentFor, projectIdFor, type DockRole } from "./route-context";
 
 /** What a page tells the assistant panel about itself. */
 export type PageAssistant = {
   agent: DockAgent;
-  /** The service this page is about (the Profile agent keeps a conversation per service). */
+  /** The project this page is about (the Freelancer Agent keeps a conversation per project). */
   subjectId?: string;
   /** Scopes the remembered conversation, e.g. "new-service" on the Services list. */
   resumeKey?: string;
@@ -72,9 +72,9 @@ export function AssistantProvider({ role, paypalClientId, market, children }: { 
 
   const scopeFor = useCallback(
     (agent: DockAgent): ChatScope => {
-      // subjectId carries the page's subject: a service (Profile).
+      // subjectId carries the page's subject: a project (Freelancer Agent).
       if (page?.cfg.agent === agent) return { subjectId: page.cfg.subjectId, resumeKey: page.cfg.resumeKey ?? (agent === "HIRING" ? market : undefined) };
-      if (agent === "PROFILE") return { subjectId: serviceIdFor(pathname) };
+      if (agent === "PROFILE") return { subjectId: projectIdFor(pathname) };
       if (agent === "HIRING") return { resumeKey: market };
       return {};
     },
@@ -130,7 +130,7 @@ export function AssistantProvider({ role, paypalClientId, market, children }: { 
 
 /**
  * A page's say in what the assistant panel does: which agent it opens on, which
- * service it is about, and what to refresh after a reply. Call it once per page.
+ * project it is about, and what to refresh after a reply. Call it once per page.
  */
 export function usePageAssistant(cfg: PageAssistant): void {
   const { register, unregister } = useAssistant();

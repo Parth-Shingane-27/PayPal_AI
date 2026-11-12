@@ -3,50 +3,37 @@ import type { ReasoningEffort } from "../config";
 import { prisma } from "../db";
 import { getMarket, isMarketLocale } from "../domain/markets";
 import { AppError, notFound } from "../errors";
-import type { AuditCtx } from "../services/audit";
 import { buildContext } from "./context";
 import type { ModelApi } from "./model";
-import { agentSpec, FREELANCER_AGENT_NAMES } from "./registry";
-import { type Classifier, classifyWithGroq, type Route } from "./router";
+import { agentForRole, agentSpec } from "./registry";
 import { type RunEvent, type RunResult, runAgent } from "./runtime";
 import { createSession, getSession, type SessionOwner } from "./sessions";
 
 /**
- * Orchestration is code, plus one small classifier:
- *  - clients only ever reach the Hiring Agent;
- *  - freelancer screens map straight to an agent (service editor -> Profile,
- *    earnings -> Treasury, projects -> Projects);
- *  - the freelancer Assistant box routes a NEW conversation once, then it stays;
- *  - at most one handoff per user message, never back to the same agent.
+ * Orchestration is code: each role has exactly one assistant. A client talks
+ * to the Client Agent (HIRING), a freelancer to the Freelancer Agent
+ * (PROFILE). There is no routing and no handoff.
  */
 
-type OrchestratorEvent =
-  | RunEvent
-  | { type: "session"; sessionId: string; agent: AgentName }
-  | { type: "routed"; agent: AgentName; reason: string }
-  | { type: "handoff"; from: AgentName; to: AgentName; sessionId: string };
+type OrchestratorEvent = RunEvent | { type: "session"; sessionId: string; agent: AgentName };
 
 type ChatRequest = {
   owner: SessionOwner;
   text: string;
   /** Continue this conversation; omit to start a new one. */
   sessionId?: string | null;
-  /** Freelancer screens name their agent; null/undefined in the Assistant box. Ignored for clients. */
-  agent?: AgentName | null;
   /** Client market from the session; ignored for freelancers (their own locale applies). */
   marketLocale?: string | null;
-  /** Service editor: the service being edited. */
-  serviceId?: string | null;
+  /** The project the person is looking at, so the assistant knows what "this" means. */
+  projectId?: string | null;
   onEvent?: (e: OrchestratorEvent) => void;
-  deps?: { model?: ModelApi; classify?: Classifier; reasoningEffort?: ReasoningEffort; modelId?: string };
+  deps?: { model?: ModelApi; reasoningEffort?: ReasoningEffort; modelId?: string };
 };
 
 export type ChatResponse = {
   sessionId: string;
   agent: AgentName;
-  routed: Route | null;
   turns: RunResult[];
-  handoff: { from: AgentName; to: AgentName; sessionId: string } | null;
 };
 
 async function localeFor(req: ChatRequest): Promise<string> {
@@ -62,62 +49,26 @@ async function localeFor(req: ChatRequest): Promise<string> {
 
 export async function sendMessage(req: ChatRequest): Promise<ChatResponse> {
   const { owner } = req;
-  const audit: AuditCtx = { actor: owner, agent: null, sessionId: null };
-  let routed: Route | null = null;
+  if (owner.type !== "FREELANCER" && owner.type !== "CLIENT") throw new AppError("FORBIDDEN", "Sign in as a freelancer or a client.");
+  const mine = agentForRole(owner.type);
 
-  let session;
-  if (req.sessionId) {
-    session = await getSession(req.sessionId, owner);
-  } else {
-    let agent: AgentName;
-    if (owner.type === "CLIENT") {
-      agent = "HIRING";
-    } else if (req.agent) {
-      if (!(FREELANCER_AGENT_NAMES as readonly string[]).includes(req.agent)) throw new AppError("FORBIDDEN", "That assistant is not available to freelancers.");
-      agent = req.agent;
-    } else {
-      routed = await (req.deps?.classify ?? classifyWithGroq)(req.text, audit);
-      agent = routed.agent;
-      req.onEvent?.({ type: "routed", agent: routed.agent, reason: routed.reason });
-    }
-    session = await createSession(owner, agent, await localeFor(req));
-  }
-  if (owner.type === "CLIENT" && session.agent !== "HIRING") throw notFound("Conversation");
-  if (owner.type === "FREELANCER" && session.agent === "HIRING") throw notFound("Conversation");
+  const session = req.sessionId ? await getSession(req.sessionId, owner) : await createSession(owner, mine, await localeFor(req));
+  if (session.agent !== mine) throw notFound("Conversation");
   req.onEvent?.({ type: "session", sessionId: session.id, agent: session.agent });
 
   const market = getMarket(session.locale);
-  const actor = owner;
-  const base = { owner, actor, market, model: req.deps?.model, reasoningEffort: req.deps?.reasoningEffort, modelId: req.deps?.modelId, onEvent: req.onEvent };
-
-  const first = await runAgent({
-    ...base,
+  const turn = await runAgent({
+    owner,
+    actor: owner,
+    market,
+    model: req.deps?.model,
+    reasoningEffort: req.deps?.reasoningEffort,
+    modelId: req.deps?.modelId,
+    onEvent: req.onEvent,
     sessionId: session.id,
     spec: agentSpec(session.agent),
     userText: req.text,
-    context: await buildContext(owner, market, { serviceId: req.serviceId }),
+    context: await buildContext(owner, market, { projectId: req.projectId }),
   });
-
-  if (!first.handoff || owner.type !== "FREELANCER" || first.handoff.agent === session.agent) {
-    return { sessionId: session.id, agent: session.agent, routed, turns: [first], handoff: null };
-  }
-
-  const to = first.handoff.agent;
-  const child = await createSession(owner, to, session.locale, session.id);
-  req.onEvent?.({ type: "handoff", from: session.agent, to, sessionId: child.id });
-  const second = await runAgent({
-    ...base,
-    sessionId: child.id,
-    spec: agentSpec(to),
-    userText: req.text,
-    context: await buildContext(owner, market, { handoff: { from: session.agent, summary: first.handoff.summary } }),
-    handoffAllowed: false,
-  });
-  return {
-    sessionId: child.id,
-    agent: to,
-    routed,
-    turns: [first, second],
-    handoff: { from: session.agent, to, sessionId: child.id },
-  };
+  return { sessionId: session.id, agent: session.agent, turns: [turn] };
 }

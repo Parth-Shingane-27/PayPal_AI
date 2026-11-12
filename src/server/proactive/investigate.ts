@@ -44,12 +44,12 @@ export async function runsToday(freelancerId: string, now = new Date()): Promise
  * Returns true when the agent wrote the text.
  */
 export async function investigate(finding: Finding, deps: InvestigateDeps = {}, now = new Date()): Promise<boolean> {
-  if (finding.agent !== "TREASURY" && finding.agent !== "PROJECTS") return false;
+  if (finding.agent !== "PROFILE") return false;
   if (!finding.freelancer_id) return false;
   if ((await runsToday(finding.freelancer_id, now)) >= MAX_PROACTIVE_RUNS_PER_DAY) return false;
 
   const freelancer = await prisma.freelancer.findUniqueOrThrow({ where: { id: finding.freelancer_id } });
-  const spec = proactiveSpec(finding.agent, { autoPayoutProposals: freelancer.auto_payout_proposals });
+  const spec = proactiveSpec({ autoPayoutProposals: freelancer.auto_payout_proposals });
   const session = await prisma.agentSession.create({
     data: { agent: finding.agent, actor: "SYSTEM", freelancer_id: freelancer.id, locale: freelancer.locale },
   });
@@ -60,7 +60,7 @@ export async function investigate(finding: Finding, deps: InvestigateDeps = {}, 
     "[automatic check]",
     `Rule: ${finding.type} (subject ${finding.fingerprint.split(":").slice(1).join(":")}). Severity: ${finding.severity.toLowerCase()}.`,
     `Evidence from the rule: ${JSON.stringify(finding.evidence)}`,
-    finding.agent === "TREASURY" ? `Payout proposals are ${freelancer.auto_payout_proposals && finding.type === "payout_ready" ? "enabled" : "not enabled"} for this check.` : "",
+    `Payout proposals are ${freelancer.auto_payout_proposals && finding.type === "payout_ready" ? "enabled" : "not enabled"} for this check.`,
     Object.keys(dismissed).length ? `The freelancer has dismissed these before: ${Object.keys(dismissed).join(", ")}.` : "",
     "Verify with your tools, then write the finding.",
   ].filter(Boolean);

@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import type { MilestoneState, PackageTier, Prisma, ReleaseKind } from "../../src/generated/prisma/client";
+import type { MilestoneState, Prisma, ReleaseKind } from "../../src/generated/prisma/client";
 import { prisma } from "../../src/server/db";
 import { netOnRelease, refundSplit } from "../../src/server/domain/balances";
 import { estimatePayoutFee, estimateSaleFees } from "../../src/server/domain/fees";
@@ -14,8 +14,9 @@ import type { Rng } from "./prng";
 import { BRIEFS, fill, type Scenario, SCRIPTS, SUBJECTS } from "./scripts";
 
 /**
- * Six months of freelance work: briefs, quotes, ~120 contracts and ~300
- * milestones, simulated along a timeline. Each milestone walks
+ * Six months of freelance work: projects clients posted, the proposals
+ * freelancers sent, ~120 contracts and ~300 milestones, simulated along a
+ * timeline. Each milestone walks
  * fund -> start -> deliver -> (revision) -> accept / auto-release / dispute,
  * and every step dated after "now" is simply not taken, so the data covers
  * every state with consistent dates, money, history and invoices.
@@ -32,21 +33,36 @@ const HISTORY_DAYS = 182;
 export const AUTO_RELEASE_DAYS = 7;
 const CONTRACTS = 102; // plus the "current work" contracts below: 120 in all
 
+/** Which project categories each freelancer answers (matches their skills). */
+const CATEGORIES_OF: Record<string, string[]> = {
+  priya: ["Design"],
+  camille: ["Design"],
+  jonas: ["Translation"],
+  sofia: ["Translation"],
+  lucas: ["Development"],
+  maria: ["Video"],
+  emily: ["Writing"],
+  haruka: ["3D"],
+  giulia: ["Illustration"],
+  oliver: ["Data"],
+};
+/** Skills a project of each category asks for (they match freelancers' skills on the project board). */
+const CATEGORY_SKILLS: Record<string, string[]> = {
+  Design: ["logo design", "brand identity", "ux design"],
+  Translation: ["translation", "localization"],
+  Development: ["react", "typescript"],
+  Video: ["video editing"],
+  Writing: ["copywriting", "seo"],
+  "3D": ["3d modeling", "blender"],
+  Illustration: ["illustration"],
+  Data: ["python", "sql"],
+};
+/** Estimated hours of work for a project, by category. */
+const HOURS: [number, number] = [8, 50];
+const PROPOSAL_MARKUP = 1.35;
+
 export type SeedFreelancer = SeedFreelancerSpec & { id: string; invoice_prefix: string; paypal_email: string };
 export type SeedClient = SeedClientSpec & { id: string };
-export type SeedPage = {
-  id: string;
-  service_id: string;
-  freelancer_id: string;
-  locale: string;
-  currency: string;
-  title: string;
-  category: string;
-  hero: boolean;
-  model: "PACKAGES" | "HOURLY";
-  hourly_rate_minor: number | null;
-  packages: { id: string; tier: PackageTier; name: string; scope: string; delivery_days: number; revisions: number; price_minor: number }[];
-};
 
 type Ev = { at: number; event: string; from: MilestoneState; to: MilestoneState; actor: "CLIENT" | "FREELANCER" | "SYSTEM"; note?: string };
 
@@ -89,11 +105,15 @@ const MILESTONE_TITLES: Record<number, string[]> = {
 };
 const WEIGHTS: Record<number, number[]> = { 1: [10_000], 2: [4_000, 6_000], 3: [3_000, 3_000, 4_000], 4: [2_500, 2_500, 2_500, 2_500] };
 
-export async function seedProjects(opts: { rng: Rng; now: number; freelancers: SeedFreelancer[]; clients: SeedClient[]; pages: SeedPage[]; platformBps: number }) {
-  const { rng, now, freelancers, clients, pages, platformBps } = opts;
+export async function seedProjects(opts: { rng: Rng; now: number; freelancers: SeedFreelancer[]; clients: SeedClient[]; platformBps: number }) {
+  const { rng, now, freelancers, clients, platformBps } = opts;
   const fById = new Map(freelancers.map((f) => [f.id, f]));
   const first = (name: string) => name.split(" ")[0]!;
   const d = (t: number) => new Date(t);
+  const answering = (category: string) => freelancers.filter((f) => CATEGORIES_OF[f.slug]?.includes(category));
+  /** A proposal price in the project's currency: hours x the freelancer's floor, converted, with a margin. */
+  const priceFor = (f: SeedFreelancer, currency: string, rounding: ReturnType<typeof getMarket>["rounding"], hours: number) =>
+    roundUpToPricePoint(Math.round(convertAtReference(hours * f.hourly_floor_minor, f.currency, currency) * PROPOSAL_MARKUP), rounding, currency);
 
   // --- Briefs ---------------------------------------------------------------
   const briefRows: Prisma.BriefCreateManyInput[] = [];
@@ -114,7 +134,7 @@ export async function seedProjects(opts: { rng: Rng; now: number; freelancers: S
         title: text.title,
         description: text.description,
         locale: c.locale,
-        skills: [],
+        skills: CATEGORY_SKILLS[category]!,
         budget_minor: rng.chance(0.6) ? roundUpToPricePoint(convertAtReference(budgetUsd * 100, "USD", currency), "tens", currency) : null,
         budget_currency: currency,
         deadline: rng.chance(0.5) ? d(at + rng.int(20, 60) * DAY) : null,
@@ -127,7 +147,7 @@ export async function seedProjects(opts: { rng: Rng; now: number; freelancers: S
       briefsByClient.set(c.id, list);
     }
   }
-  // A couple of drafts the client has not sent to anyone yet.
+  // A couple of drafts the client has not posted yet.
   for (const b of briefRows.slice(0, 3)) b.status = "DRAFT";
   // Fix budget_currency on briefs without a budget.
   for (const b of briefRows) if (b.budget_minor === null) b.budget_currency = null;
@@ -135,10 +155,7 @@ export async function seedProjects(opts: { rng: Rng; now: number; freelancers: S
   // --- Contracts ------------------------------------------------------------
   const quoteRows: Prisma.QuoteCreateManyInput[] = [];
   const contractRows: Prisma.ContractCreateManyInput[] = [];
-  const sims: { contractId: string; freelancer: SeedFreelancer; client: SeedClient; page: SeedPage; currency: string; locale: string; title: string; ms: SimMilestone[]; createdAt: number; quoteId: string | null }[] = [];
-
-  const pagesByMarket = new Map<string, SeedPage[]>();
-  for (const p of pages) pagesByMarket.set(p.locale, [...(pagesByMarket.get(p.locale) ?? []), p]);
+  const sims: { contractId: string; freelancer: SeedFreelancer; client: SeedClient; currency: string; locale: string; title: string; ms: SimMilestone[]; createdAt: number; quoteId: string | null }[] = [];
 
   /**
    * "Current work": contracts whose first milestone is placed in a given state
@@ -153,65 +170,64 @@ export async function seedProjects(opts: { rng: Rng; now: number; freelancers: S
   for (let i = 0; i < CONTRACTS + FORCED.length; i++) {
     const forced: Forced | null = i >= CONTRACTS ? FORCED[i - CONTRACTS]! : null;
     const client = rng.weighted(clients, (c) => c.demand);
-    const market = pagesByMarket.get(client.locale) ?? [];
-    const page = rng.weighted(market, (p) => (fById.get(p.freelancer_id)!.demand) * (p.hero ? 2.2 : 1));
-    const freelancer = fById.get(page.freelancer_id)!;
+    const category = rng.pick(Object.keys(BRIEFS).filter((c) => answering(c).length > 0));
+    const freelancer = rng.weighted(answering(category), (f) => f.demand);
     const m = getMarket(client.locale);
     // Older work is more often finished; skew creation toward recent months.
     const age = forced ? rng.int(4, 12) : Math.floor(Math.pow(rng.next(), 1.25) * (HISTORY_DAYS - 2)) + 1;
     const createdAt = now - age * DAY - rng.int(0, 20) * HOUR;
 
-    const fromQuote = forced ? page.model === "HOURLY" : page.model === "HOURLY" || rng.chance(0.3);
-    let total: number;
-    let revisions: number;
-    let days: number;
-    let tier: PackageTier | null = null;
-    let pkg: SeedPage["packages"][number] | undefined;
-    if (!fromQuote) {
-      tier = forced === "REVISION_LOOP" ? "PREMIUM" : rng.weighted(["BASIC", "STANDARD", "PREMIUM"] as const, (t) => ({ BASIC: 0.3, STANDARD: 0.45, PREMIUM: 0.25 })[t]);
-      pkg = page.packages.find((p) => p.tier === tier)!;
-      total = pkg.price_minor;
-      revisions = pkg.revisions;
-      days = pkg.delivery_days;
-    } else {
-      const base = page.model === "HOURLY" ? page.hourly_rate_minor! * rng.int(8, 50) : page.packages.find((p) => p.tier === "STANDARD")!.price_minor * (1.1 + rng.next() * 0.9);
-      total = roundUpToPricePoint(Math.round(base), m.rounding, m.currency);
-      revisions = rng.int(1, 3);
-      days = rng.int(7, 35);
-    }
-    const n = !fromQuote ? (tier === "BASIC" ? rng.int(1, 2) : tier === "STANDARD" ? rng.int(2, 3) : rng.int(3, 4)) : rng.int(2, 4);
+    // The client's project post and the freelancer's proposal that won it.
+    const hours = rng.int(HOURS[0], HOURS[1]);
+    const total = priceFor(freelancer, m.currency, m.rounding, hours);
+    let revisions = rng.int(1, 3);
+    const days = rng.int(7, 35);
+    const n = rng.int(2, 4);
     if (forced === "REVISION_LOOP") revisions = Math.max(revisions, 4);
     const amounts = splitByWeights(total, WEIGHTS[n]!);
-    const title = fromQuote ? (BRIEFS[page.category]?.[langOf(client.locale)].title ?? page.title) : `${page.title}: ${pkg!.name}`;
+    const text = BRIEFS[category]![langOf(client.locale)];
+    const title = text.title;
 
     const contractId = randomUUID();
-    let quoteId: string | null = null;
-    if (fromQuote) {
-      quoteId = randomUUID();
-      const brief = briefsByClient.get(client.id)?.find((b) => b.category === page.category && b.at < createdAt);
-      const requestedAt = createdAt - rng.int(2, 6) * DAY;
-      quoteRows.push({
-        id: quoteId,
-        client_id: client.id,
-        freelancer_id: freelancer.id,
-        brief_id: brief?.id ?? null,
-        service_id: page.service_id,
-        locale: client.locale,
-        currency: m.currency,
-        status: "SENT", // set to ACCEPTED below once milestone 1 is funded
-        request_message: fill(SCRIPTS.question[0]![langOf(client.locale)], { service: page.title, client: first(client.name), freelancer: first(freelancer.name) }),
-        total_minor: total,
-        delivery_days: days,
-        revisions,
-        scope: page.packages.find((p) => p.tier === "PREMIUM")?.scope ?? "Scope as discussed in the thread.",
-        message: "Happy to help. The price covers everything in the scope above.",
-        requested_at: d(requestedAt),
-        sent_at: d(requestedAt + rng.int(3, 20) * HOUR),
-        expires_at: d(requestedAt + 16 * DAY),
-        created_at: d(requestedAt),
-        updated_at: d(createdAt),
-      });
-    }
+    const projectId = randomUUID();
+    const postedAt = createdAt - rng.int(4, 12) * DAY;
+    briefRows.push({
+      id: projectId,
+      client_id: client.id,
+      title: text.title,
+      description: text.description,
+      locale: client.locale,
+      skills: CATEGORY_SKILLS[category]!,
+      budget_minor: rng.chance(0.6) ? Math.round(total * (1 + rng.next() * 0.5)) : null,
+      budget_currency: null,
+      status: "CLOSED",
+      created_at: d(postedAt),
+      updated_at: d(createdAt),
+    });
+    const budgeted = briefRows.at(-1)!;
+    budgeted.budget_currency = budgeted.budget_minor === null ? null : m.currency;
+    const quoteId = randomUUID();
+    const sentAt = postedAt + rng.int(3, 60) * HOUR;
+    quoteRows.push({
+      id: quoteId,
+      client_id: client.id,
+      freelancer_id: freelancer.id,
+      brief_id: projectId,
+      locale: client.locale,
+      currency: m.currency,
+      status: "SENT", // set to ACCEPTED below once milestone 1 is funded
+      request_message: text.title,
+      total_minor: total,
+      delivery_days: days,
+      revisions,
+      scope: "Scope as described in the project, with the deliverables agreed in the thread.",
+      message: "Happy to help. The price covers everything in the scope above.",
+      requested_at: d(postedAt),
+      sent_at: d(sentAt),
+      expires_at: d(sentAt + 16 * DAY),
+      created_at: d(sentAt),
+      updated_at: d(createdAt),
+    });
 
     // Simulate the milestones in order.
     const ms: SimMilestone[] = [];
@@ -422,7 +438,7 @@ export async function seedProjects(opts: { rng: Rng; now: number; freelancers: S
       }
     }
 
-    sims.push({ contractId, freelancer, client, page, currency: m.currency, locale: client.locale, title: title.slice(0, 140), ms, createdAt, quoteId });
+    sims.push({ contractId, freelancer, client, currency: m.currency, locale: client.locale, title: title.slice(0, 140), ms, createdAt, quoteId });
     const funded = ms.filter((x) => x.funded_at !== undefined);
     const settled = ms.every((x) => x.state === "ACCEPTED" || x.state === "REFUNDED" || x.state === "CANCELLED");
     const allCancelled = ms.every((x) => x.state === "CANCELLED");
@@ -431,12 +447,10 @@ export async function seedProjects(opts: { rng: Rng; now: number; freelancers: S
       id: contractId,
       client_id: client.id,
       freelancer_id: freelancer.id,
-      source: fromQuote ? "QUOTE" : "PACKAGE",
-      service_id: page.service_id,
-      package_id: pkg?.id ?? null,
+      source: "QUOTE",
       quote_id: quoteId,
       title: title.slice(0, 140),
-      scope: pkg?.scope ?? "Scope as agreed in the quote.",
+      scope: "Scope as agreed in the proposal.",
       locale: client.locale,
       currency: m.currency,
       total_minor: total,
@@ -447,53 +461,53 @@ export async function seedProjects(opts: { rng: Rng; now: number; freelancers: S
       created_at: d(createdAt),
       updated_at: d(lastAt),
     });
-    if (quoteId) {
+    {
       const q = quoteRows.find((x) => x.id === quoteId)!;
       if (funded.length) Object.assign(q, { status: "ACCEPTED", decided_at: d(funded[0]!.funded_at!) });
       else if (allCancelled) Object.assign(q, { status: "DECLINED", decided_at: d(lastAt) });
     }
   }
 
-  // Open quote requests and other quote outcomes, for the quotes screens and detectors.
-  const quoteOutcomes: { status: "REQUESTED" | "SENT" | "DECLINED" | "EXPIRED" | "WITHDRAWN"; ageHours: [number, number] }[] = [
-    ...Array.from({ length: 4 }, () => ({ status: "REQUESTED" as const, ageHours: [2, 20] as [number, number] })),
-    ...Array.from({ length: 5 }, () => ({ status: "REQUESTED" as const, ageHours: [30, 120] as [number, number] })), // unanswered > 24h
-    ...Array.from({ length: 6 }, () => ({ status: "SENT" as const, ageHours: [24, 200] as [number, number] })),
+  // Proposals on the open projects (the board): waiting for the client, and some that ended without a contract.
+  type Outcome = { status: "SENT" | "DECLINED" | "EXPIRED" | "WITHDRAWN"; ageHours: [number, number] };
+  const outcomes: Outcome[] = [
+    ...Array.from({ length: 14 }, () => ({ status: "SENT" as const, ageHours: [4, 200] as [number, number] })),
     ...Array.from({ length: 4 }, () => ({ status: "DECLINED" as const, ageHours: [300, 3000] as [number, number] })),
-    ...Array.from({ length: 4 }, () => ({ status: "EXPIRED" as const, ageHours: [800, 3500] as [number, number] })),
+    ...Array.from({ length: 3 }, () => ({ status: "EXPIRED" as const, ageHours: [800, 3500] as [number, number] })),
     ...Array.from({ length: 2 }, () => ({ status: "WITHDRAWN" as const, ageHours: [200, 2000] as [number, number] })),
   ];
-  for (const o of quoteOutcomes) {
-    const client = rng.weighted(clients, (c) => c.demand);
-    const page = rng.pick(pagesByMarket.get(client.locale) ?? []);
-    const freelancer = fById.get(page.freelancer_id)!;
-    const m = getMarket(client.locale);
-    const requestedAt = now - rng.int(o.ageHours[0], o.ageHours[1]) * HOUR;
-    const priced = o.status !== "REQUESTED" && o.status !== "WITHDRAWN";
-    const brief = briefsByClient.get(client.id)?.find((b) => b.category === page.category);
-    const std = page.packages.find((p) => p.tier === "STANDARD");
-    const total = priced ? roundUpToPricePoint(Math.round((std?.price_minor ?? page.hourly_rate_minor! * 20) * (1 + rng.next())), m.rounding, m.currency) : null;
+  const board = briefRows.filter((b) => b.status === "OPEN");
+  const sentBy = new Set<string>();
+  for (const o of outcomes) {
+    const brief = rng.pick(board);
+    const category = Object.entries(CATEGORY_SKILLS).find(([, skills]) => skills.join() === (brief.skills as string[]).join())![0];
+    const options = answering(category).filter((f) => !sentBy.has(`${brief.id}|${f.id}`));
+    if (options.length === 0) continue;
+    const freelancer = rng.pick(options);
+    sentBy.add(`${brief.id}|${freelancer.id}`);
+    const m = getMarket(brief.locale as string);
+    const sentAt = now - rng.int(o.ageHours[0], o.ageHours[1]) * HOUR;
+    const total = priceFor(freelancer, m.currency, m.rounding, rng.int(HOURS[0], HOURS[1]));
     quoteRows.push({
       id: randomUUID(),
-      client_id: client.id,
+      client_id: brief.client_id as string,
       freelancer_id: freelancer.id,
-      brief_id: brief?.id ?? null,
-      service_id: page.service_id,
-      locale: client.locale,
+      brief_id: brief.id as string,
+      locale: brief.locale as string,
       currency: m.currency,
       status: o.status === "EXPIRED" ? "SENT" : o.status, // expiry is computed from expires_at
-      request_message: brief ? BRIEFS[page.category]![langOf(client.locale)].description : fill(SCRIPTS.question[0]![langOf(client.locale)], { service: page.title, client: first(client.name), freelancer: first(freelancer.name) }),
+      request_message: brief.title as string,
       total_minor: total,
-      delivery_days: priced ? rng.int(5, 30) : null,
-      revisions: priced ? rng.int(1, 3) : null,
-      scope: priced ? (std?.scope ?? "Scope as discussed.") : null,
-      message: priced ? "Here is my price for the scope you described." : null,
-      requested_at: d(requestedAt),
-      sent_at: priced ? d(requestedAt + rng.int(3, 20) * HOUR) : null,
-      expires_at: priced ? d(o.status === "EXPIRED" ? requestedAt + 14 * DAY : Math.max(now + 3 * DAY, requestedAt + 14 * DAY)) : null,
-      decided_at: o.status === "DECLINED" || o.status === "WITHDRAWN" ? d(requestedAt + rng.int(30, 120) * HOUR) : null,
-      created_at: d(requestedAt),
-      updated_at: d(requestedAt),
+      delivery_days: rng.int(5, 30),
+      revisions: rng.int(1, 3),
+      scope: "Scope as described in the project, with the deliverables listed in the proposal.",
+      message: "Here is my price for the scope you described.",
+      requested_at: d(sentAt),
+      sent_at: d(sentAt),
+      expires_at: d(o.status === "EXPIRED" ? sentAt + 14 * DAY : Math.max(now + 3 * DAY, sentAt + 14 * DAY)),
+      decided_at: o.status === "DECLINED" || o.status === "WITHDRAWN" ? d(sentAt + rng.int(30, 120) * HOUR) : null,
+      created_at: d(sentAt),
+      updated_at: d(sentAt),
     });
   }
 
@@ -698,7 +712,7 @@ export async function seedProjects(opts: { rng: Rng; now: number; freelancers: S
   // --- Threads with translations ----------------------------------------------
   const threadRows: Prisma.ThreadCreateManyInput[] = [];
   const messageRows: Prisma.ThreadMessageCreateManyInput[] = [];
-  const addThread = (o: { freelancer: SeedFreelancer; client: SeedClient; serviceTitle: string; serviceId: string; contractId: string | null; quoteId: string | null; scenarios: { s: Scenario; at: number }[] }) => {
+  const addThread = (o: { freelancer: SeedFreelancer; client: SeedClient; serviceTitle: string; contractId: string | null; quoteId: string | null; scenarios: { s: Scenario; at: number }[] }) => {
     const id = randomUUID();
     const cl = langOf(o.client.locale);
     const fl = langOf(o.freelancer.locale);
@@ -730,7 +744,6 @@ export async function seedProjects(opts: { rng: Rng; now: number; freelancers: S
       id,
       freelancer_id: o.freelancer.id,
       client_id: o.client.id,
-      service_id: o.serviceId,
       contract_id: o.contractId,
       quote_id: o.quoteId,
       subject: (o.contractId ? o.serviceTitle : SUBJECTS[o.scenarios[0]!.s][cl]).slice(0, 140),
@@ -751,12 +764,14 @@ export async function seedProjects(opts: { rng: Rng; now: number; freelancers: S
     const lastReleased = s.ms.filter((x) => x.released_at).at(-1);
     if (lastReleased && s.ms.every((x) => x.state === "ACCEPTED")) scenarios.push({ s: "thanks", at: lastReleased.released_at! + HOUR });
     if (!scenarios.length) scenarios.push({ s: "question", at: s.createdAt - DAY });
-    addThread({ freelancer: s.freelancer, client: s.client, serviceTitle: s.page.title, serviceId: s.page.service_id, contractId: s.contractId, quoteId: s.quoteId, scenarios: scenarios.sort((a, b) => a.at - b.at) });
+    addThread({ freelancer: s.freelancer, client: s.client, serviceTitle: s.title, contractId: s.contractId, quoteId: s.quoteId, scenarios: scenarios.sort((a, b) => a.at - b.at) });
   }
   for (let i = 0; i < 12; i++) {
-    const client = rng.pick(clients);
-    const page = rng.pick(pagesByMarket.get(client.locale) ?? []);
-    addThread({ freelancer: fById.get(page.freelancer_id)!, client, serviceTitle: page.title, serviceId: page.service_id, contractId: null, quoteId: null, scenarios: [{ s: "question", at: now - rng.int(1, 120) * DAY - rng.int(0, 20) * HOUR }] });
+    const brief = rng.pick(board);
+    const client = clients.find((c) => c.id === brief.client_id)!;
+    const category = Object.entries(CATEGORY_SKILLS).find(([, skills]) => skills.join() === (brief.skills as string[]).join())![0];
+    const freelancer = rng.pick(answering(category));
+    addThread({ freelancer, client, serviceTitle: brief.title as string, contractId: null, quoteId: null, scenarios: [{ s: "question", at: now - rng.int(1, 120) * DAY - rng.int(0, 20) * HOUR }] });
   }
 
   // --- One refund proposal waiting for approval (Approvals page demo) ---------
@@ -780,7 +795,7 @@ export async function seedProjects(opts: { rng: Rng; now: number; freelancers: S
     });
     actionRows.push({
       kind: "TOOL",
-      agent: "PROJECTS",
+      agent: "PROFILE",
       tool: "propose_refund",
       input: { milestone_id: sm.id, amount: null, reason: "Half refund proposed to settle the dispute." },
       output: { status: "PENDING_APPROVAL", refund_id: refundId, from_holding: true, message: "Refund proposed. It is only sent after the freelancer approves it on the Approvals page." },
@@ -813,26 +828,6 @@ export async function seedProjects(opts: { rng: Rng; now: number; freelancers: S
   await many(messageRows, (data) => prisma.threadMessage.createMany({ data }));
   for (const [fid, seq] of lastSeq) await prisma.freelancer.update({ where: { id: fid }, data: { invoice_seq: seq } });
 
-  // Page traffic for the last 90 days, with contracts started from each page.
-  const startedByPageDay = new Map<string, number>();
-  for (const s of sims) {
-    const day = new Date(s.createdAt).toISOString().slice(0, 10);
-    const k = `${s.page.id}|${day}`;
-    startedByPageDay.set(k, (startedByPageDay.get(k) ?? 0) + 1);
-  }
-  const statRows: Prisma.ServicePageDailyStatCreateManyInput[] = [];
-  for (const p of pages) {
-    const base = (p.hero ? 9 : 3) * (fById.get(p.freelancer_id)!.demand);
-    for (let i = 89; i >= 0; i--) {
-      const day = new Date(now - i * DAY).toISOString().slice(0, 10);
-      const views = rng.poisson(base);
-      const quote_requests = rng.poisson(base * 0.04);
-      const contracts = startedByPageDay.get(`${p.id}|${day}`) ?? 0;
-      if (views || quote_requests || contracts) statRows.push({ page_id: p.id, day: new Date(`${day}T00:00:00.000Z`), views: views + contracts * 3, quote_requests, contracts });
-    }
-  }
-  await many(statRows, (data) => prisma.servicePageDailyStat.createMany({ data }));
-
   const states = new Map<string, number>();
   for (const r of milestoneRows) states.set(r.state!, (states.get(r.state!) ?? 0) + 1);
   return {
@@ -846,7 +841,6 @@ export async function seedProjects(opts: { rng: Rng; now: number; freelancers: S
     payouts: payoutRows.length,
     threads: threadRows.length,
     messages: messageRows.length,
-    stats: statRows.length,
   };
 }
 

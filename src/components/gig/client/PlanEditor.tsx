@@ -5,8 +5,7 @@ import { api, ApiError, type Money } from "../../api";
 import { useI18n } from "../../i18n/I18nProvider";
 
 /**
- * The client's milestone plan for a fixed total (a sent quote or a package
- * price). Rows have a title, an optional amount and an optional due date in
+ * The client's milestone plan for a fixed total (the price of a proposal). Rows have a title, an optional amount and an optional due date in
  * days. Either every row has an amount, or none (the server splits the total
  * evenly). The browser never adds the amounts up: it sends the decimal strings
  * as typed and shows the server's verdict (POST /api/contracts), including the
@@ -16,7 +15,7 @@ import { useI18n } from "../../i18n/I18nProvider";
  */
 
 type Row = { key: number; title: string; amount: string; days: string };
-export type PlanSource = { quote_id: string } | { service_page_id: string; tier: "BASIC" | "STANDARD" | "PREMIUM" };
+export type PlanSource = { quote_id: string };
 
 const MAX = 10;
 const DECIMAL = /^\d+(\.\d+)?$/;

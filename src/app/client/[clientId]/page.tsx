@@ -1,73 +1,74 @@
 import Link from "next/link";
-import { AutoReleaseCountdown, MilestoneStamp } from "@/components/gig/MilestoneStamp";
+import { AutoReleaseCountdown } from "@/components/gig/MilestoneStamp";
 import { Panel, SectionHeading } from "@/components/ui";
-import { formatMonthYear } from "@/lib/format";
-import { localeOf } from "@/lib/i18n/core";
-import type { MessageKey } from "@/lib/i18n/messages";
-import { getT, getUiLang } from "@/lib/i18n/server";
+import { getT } from "@/lib/i18n/server";
 import { clientPath } from "@/lib/routes";
-import { getMarket } from "@/server/domain/markets";
 import { clientPage } from "@/server/page-auth";
-import { clientOverview } from "@/server/services/gig/dashboards";
+import { clientHome } from "@/server/services/gig/dashboards";
 
 export const metadata = { title: "Dashboard" };
 
-/** Display order of the milestone states (kept here: a "use client" module's constants are not values on the server). */
-const STATE_ORDER = ["AWAITING_FUNDING", "FUNDED", "IN_PROGRESS", "DELIVERED", "REVISION_REQUESTED", "DISPUTED", "ACCEPTED", "REFUNDED", "CANCELLED"];
+const primary = "inline-flex min-h-11 items-center rounded-md bg-accent px-5 font-semibold text-sheet";
+const action = "inline-flex min-h-11 shrink-0 items-center rounded-md border border-rule-strong px-4 text-sm font-medium hover:border-accent hover:text-accent";
 
+/** One screen: everything that needs the client's decision in one list, then active projects and money. */
 export default async function ClientDashboard({ params }: { params: Promise<{ clientId: string }> }) {
   const client = await clientPage((await params).clientId);
   const base = clientPath(client.clientId);
   const t = await getT();
-  const uiLocale = localeOf(await getUiLang());
-  const market = getMarket(client.market);
-  const o = await clientOverview(client.clientId, client.market);
-  const states = STATE_ORDER.filter((s) => (o.milestones_by_state[s] ?? 0) > 0);
-  const months = new Map<string, string[]>();
-  for (const p of o.paid_by_month) {
-    const key = p.month ?? "";
-    months.set(key, [...(months.get(key) ?? []), p.amount.display]);
-  }
-  const monthRows = [...months.entries()].reverse();
+  const o = await clientHome(client.clientId, client.market);
+  const d = o.needs_decision;
+  const nothing = d.proposals.length + d.deliveries.length + d.plans_to_fund.length === 0;
 
   return (
     <div className="flex flex-col gap-6">
       <header className="flex flex-wrap items-end justify-between gap-4">
-        <div>
-          <p className="text-ink-3">{t("cl.dash.hiringIn", { lang: t(`langname.${client.market.slice(0, 2)}` as MessageKey), currency: market.currency })}</p>
-          <h1 className="font-display text-[2rem] leading-tight font-bold tracking-[-0.025em] md:text-[2.4rem]">{t("cl.dash.title", { name: client.name.split(" ")[0] ?? client.name })}</h1>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          <Link href={`${base}/briefs`} className="inline-flex min-h-11 items-center rounded-md border border-rule-strong px-4 text-sm font-medium hover:border-accent hover:text-accent">
-            {t("cl.dash.writeBrief")}
-          </Link>
-          <Link href={`${base}/find`} className="inline-flex min-h-11 items-center rounded-md bg-accent px-5 font-semibold text-sheet">
-            {t("cl.dash.find")}
-          </Link>
-        </div>
+        <h1 className="font-display text-[2rem] leading-tight font-bold tracking-[-0.025em] md:text-[2.4rem]">{t("pj.cd.hello", { name: client.name.split(" ")[0] ?? client.name })}</h1>
+        <Link href={`${base}/briefs?new=1`} className={primary}>
+          {t("pj.cd.post")}
+        </Link>
       </header>
 
-      <section aria-labelledby="review-title" className="overflow-hidden rounded-[10px] border border-rule bg-accent-soft p-5 md:p-6">
-        <h2 id="review-title" className="font-display text-xl font-semibold text-accent-ink">
-          {t("cl.dash.review")}
+      <section aria-labelledby="decide-title" className="rounded-[10px] border border-rule bg-accent-soft p-5 md:p-6">
+        <h2 id="decide-title" className="font-display text-xl font-semibold text-accent-ink">
+          {t("pj.cd.decide")}
         </h2>
-        <p className="mt-1 max-w-[70ch] text-sm text-accent-ink">{t("cl.dash.reviewIntro")}</p>
-        {o.awaiting_your_review.length === 0 ? (
-          <p className="mt-4 text-accent-ink">{t("cl.dash.reviewNone")}</p>
+        {nothing ? (
+          <p className="mt-2 max-w-[60ch] text-accent-ink">{t("pj.cd.decideNone")}</p>
         ) : (
-          <ul className="mt-4 grid gap-3 bq-md:grid-cols-2">
-            {o.awaiting_your_review.map((m) => (
-              <li key={m.milestone_id} className="flex flex-col gap-2 rounded-[8px] border border-rule bg-sheet p-4">
-                <div className="flex flex-wrap items-start justify-between gap-2">
-                  <div className="min-w-0">
-                    <p className="font-semibold leading-snug">{m.milestone}</p>
-                    <p className="text-sm text-ink-3">{t("cl.dash.byFreelancer", { project: m.contract, name: m.freelancer })}</p>
-                  </div>
-                  <span className="num font-display text-lg font-semibold">{m.amount.display}</span>
+          <ul className="mt-3 flex flex-col divide-y divide-rule-strong/50">
+            {d.proposals.map((p) => (
+              <li key={p.brief_id} className="flex flex-wrap items-center justify-between gap-3 py-3">
+                <p className="min-w-0 font-medium">{p.proposals === 1 ? t("pj.cd.proposalsOne", { title: p.title }) : t("pj.cd.proposalsN", { n: p.proposals, title: p.title })}</p>
+                <Link href={`${base}/briefs?open=${p.brief_id}`} className={action}>
+                  {t("pj.cd.compare")}
+                </Link>
+              </li>
+            ))}
+            {d.deliveries.map((m) => (
+              <li key={m.milestone_id} className="flex flex-wrap items-center justify-between gap-3 py-3">
+                <div className="min-w-0">
+                  <p className="font-medium">{t("pj.cd.delivered", { freelancer: m.freelancer, milestone: m.milestone, contract: m.contract })}</p>
+                  <p className="num text-sm text-ink-2">
+                    {m.amount.display}
+                    {m.auto_release_at && (
+                      <>
+                        {" · "}
+                        <AutoReleaseCountdown at={m.auto_release_at} />
+                      </>
+                    )}
+                  </p>
                 </div>
-                <AutoReleaseCountdown at={m.auto_release_at} />
-                <Link href={`${base}/projects/${m.contract_id}#ms-${m.milestone_id}`} className="inline-flex min-h-11 w-fit items-center rounded-md bg-accent px-4 text-sm font-semibold text-sheet">
-                  {t("cl.dash.reviewCta")}
+                <Link href={`${base}/projects/${m.contract_id}`} className={action}>
+                  {t("pj.cd.review")}
+                </Link>
+              </li>
+            ))}
+            {d.plans_to_fund.map((c) => (
+              <li key={c.contract_id} className="flex flex-wrap items-center justify-between gap-3 py-3">
+                <p className="min-w-0 font-medium">{t("pj.cd.fund", { title: c.title, total: c.total.display })}</p>
+                <Link href={`${base}/projects/${c.contract_id}`} className={action}>
+                  {t("pj.cd.fundCta")}
                 </Link>
               </li>
             ))}
@@ -75,57 +76,39 @@ export default async function ClientDashboard({ params }: { params: Promise<{ cl
         )}
       </section>
 
-      <div className="grid gap-6 bq-lg:grid-cols-2">
-        <Panel labelledBy="states-title">
-          <SectionHeading id="states-title" title={t("cl.dash.byState")} aside={<Link href={`${base}/projects`} className="text-accent hover:underline">{t("cl.dash.allProjects")}</Link>} />
-          {states.length === 0 ? (
-            <p className="text-sm text-ink-3">{t("cl.dash.noMilestones")}</p>
+      <div className="grid gap-4 bq-lg:grid-cols-[minmax(0,7fr)_minmax(0,5fr)]">
+        <Panel labelledBy="active-title">
+          <SectionHeading id="active-title" title={t("pj.cd.active")} aside={<Link href={`${base}/projects`} className="text-accent hover:underline">{t("cl.dash.allProjects")}</Link>} />
+          {o.active.length === 0 ? (
+            <p className="text-ink-3">{t("pj.cd.activeNone")}</p>
           ) : (
-            <ul className="divide-y divide-rule">
-              {states.map((s) => (
-                <li key={s} className="flex items-center justify-between gap-3 py-2.5">
-                  <MilestoneStamp state={s} />
-                  <span className="num font-semibold">{o.milestones_by_state[s]}</span>
+            <ul className="flex flex-col divide-y divide-rule">
+              {o.active.map((c) => (
+                <li key={c.contract_id}>
+                  <Link href={`${base}/projects/${c.contract_id}`} className="block min-h-11 py-3 hover:text-accent">
+                    <span className="block truncate font-medium">{c.title}</span>
+                    <span className="block text-sm text-ink-3">
+                      {c.freelancer} · {t("pj.cd.progress", { done: c.done, total: c.total })}
+                    </span>
+                  </Link>
                 </li>
               ))}
             </ul>
           )}
         </Panel>
-        <Panel labelledBy="paid-title">
-          <SectionHeading id="paid-title" title={t("cl.dash.paid")} aside={t("cl.dash.paidAside")} />
-          {monthRows.length === 0 ? (
-            <p className="text-sm text-ink-3">{t("cl.dash.paidNone")}</p>
-          ) : (
-            <table className="w-full text-sm">
-              <caption className="sr-only">{t("cl.dash.paid")}</caption>
-              <thead>
-                <tr className="border-b border-rule-strong text-left text-xs text-ink-3">
-                  <th scope="col" className="py-2 font-semibold">
-                    {t("chart.month")}
-                  </th>
-                  <th scope="col" className="py-2 text-right font-semibold">
-                    {t("cl.dash.paidCol")}
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {monthRows.map(([month, amounts]) => (
-                  <tr key={month} className="border-b border-rule align-top">
-                    <th scope="row" className="py-2.5 text-left font-medium">
-                      {formatMonthYear(month, uiLocale)}
-                    </th>
-                    <td className="num py-2.5 text-right">
-                      {amounts.map((a) => (
-                        <span key={a} className="block">
-                          {a}
-                        </span>
-                      ))}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
+
+        <Panel labelledBy="money-title">
+          <SectionHeading id="money-title" title={t("pj.cd.money")} aside={<Link href={`${base}/invoices`} className="text-accent hover:underline">{t("cl.nav.invoices")}</Link>} />
+          <dl className="flex flex-col gap-4">
+            <div>
+              <dt className="text-sm text-ink-3">{t("pj.cd.paid")}</dt>
+              <dd className="num font-display text-[1.5rem] leading-tight font-semibold [font-stretch:90%]">{o.paid.length ? o.paid.map((m) => m.display).join(" · ") : t("pj.cd.none")}</dd>
+            </div>
+            <div>
+              <dt className="text-sm text-ink-3">{t("pj.cd.owed")}</dt>
+              <dd className="num font-display text-[1.5rem] leading-tight font-semibold [font-stretch:90%]">{o.owed.length ? o.owed.map((m) => m.display).join(" · ") : t("pj.cd.none")}</dd>
+            </div>
+          </dl>
           <p className="mt-3 text-xs text-ink-3">{t("cl.dash.paidNote")}</p>
         </Panel>
       </div>

@@ -53,6 +53,7 @@ describe("GlobalGig translations", () => {
       await import("@/lib/i18n/messages-gig-shared").then((m) => [m.GIG_SHARED_EN, m.GIG_SHARED] as const),
       await import("@/lib/i18n/messages-gig-freelancer").then((m) => [m.GIG_FREELANCER_EN, m.GIG_FREELANCER] as const),
       await import("@/lib/i18n/messages-gig-client").then((m) => [m.GIG_CLIENT_EN, m.GIG_CLIENT] as const),
+      await import("@/lib/i18n/messages-gig-projects").then((m) => [m.GIG_PROJECTS_EN, m.GIG_PROJECTS] as const),
     ] as const;
     for (const [en, langs] of parts) {
       for (const [lang, dict] of Object.entries(langs as Record<string, Record<string, string>>)) {

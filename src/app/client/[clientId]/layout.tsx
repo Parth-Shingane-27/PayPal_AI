@@ -13,9 +13,7 @@ export const metadata: Metadata = { robots: { index: false, follow: false } };
 
 const LINKS: (Omit<NavLink, "label" | "href"> & { sub: string; key: MessageKey })[] = [
   { sub: "", key: "cl.nav.dashboard", icon: "overview", exact: true },
-  { sub: "find", key: "cl.nav.find", icon: "find" },
   { sub: "briefs", key: "cl.nav.briefs", icon: "briefs" },
-  { sub: "quotes", key: "cl.nav.quotes", icon: "quotes" },
   { sub: "projects", key: "cl.nav.projects", icon: "projects" },
   { sub: "messages", key: "nav.messages", icon: "messages", badge: "unread" },
   { sub: "invoices", key: "cl.nav.invoices", icon: "invoices" },

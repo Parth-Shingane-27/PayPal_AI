@@ -4,7 +4,6 @@ import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { api, type Money } from "@/components/api";
 import { usePageAssistant } from "@/components/assistant/AssistantContext";
-import { GigFindingsFeed } from "@/components/gig/GigFindingsFeed";
 import { AutoReleaseCountdown, milestoneStateLabel } from "@/components/gig/MilestoneStamp";
 import { dateText, errText, h1Cls, Notice } from "@/components/gig/freelancer/shared";
 import { useI18n } from "@/components/i18n/I18nProvider";
@@ -111,7 +110,7 @@ export function ProjectsBoard() {
   useEffect(() => {
     void load();
   }, [load]);
-  usePageAssistant({ agent: "PROJECTS", onResult: () => void load() });
+  usePageAssistant({ agent: "PROFILE", onResult: () => void load() });
 
   const cards = new Map<Column, Card[]>(COLUMNS.map((c) => [c, []]));
   for (const c of contracts ?? []) {
@@ -164,8 +163,6 @@ export function ProjectsBoard() {
         </div>
       </div>
       <p className="text-xs text-ink-3">{t("fl.proj.holdingNote")}</p>
-
-      <GigFindingsFeed agent="PROJECTS" />
     </div>
   );
 }

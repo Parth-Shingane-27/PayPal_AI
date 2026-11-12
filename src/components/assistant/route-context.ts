@@ -1,43 +1,37 @@
 /**
- * Which assistant a page talks to by default. Pages can say more (the open
- * service, a reload callback) with usePageAssistant; this is what the panel
- * uses when a page says nothing.
+ * Which assistant a page talks to. Each role has exactly one: freelancers the
+ * Freelancer Agent (PROFILE), clients the Client Agent (HIRING). Pages can say
+ * more (the open project, a reload callback) with usePageAssistant.
  */
 
-export type DockAgent = "ASSISTANT" | "PROFILE" | "HIRING" | "TREASURY" | "PROJECTS";
+export type DockAgent = "PROFILE" | "HIRING";
 export type DockRole = "FREELANCER" | "CLIENT";
 
-/** The agents a person can switch between in the panel. Clients only have the hiring assistant. */
+/** The agents a person can talk to in the panel: one per role, so there is nothing to switch. */
 export const AGENTS_FOR: Record<DockRole, DockAgent[]> = {
-  FREELANCER: ["ASSISTANT", "PROFILE", "TREASURY", "PROJECTS"],
+  FREELANCER: ["PROFILE"],
   CLIENT: ["HIRING"],
 };
 
-/** `/freelancer/<id>/earnings?period=x` -> "earnings"; `/freelancer/<id>/services/<s>` -> "services/<s>"; the account home -> "". */
+/** `/freelancer/<id>/earnings?period=x` -> "earnings"; `/freelancer/<id>/board/<p>` -> "board/<p>"; the account home -> "". */
 export function subPath(pathname: string): string {
   const m = /^\/(?:freelancer|client)\/[^/]+\/?(.*)$/.exec(pathname.split("?")[0] ?? "");
   return (m?.[1] ?? "").replace(/\/+$/, "");
 }
 
-export function defaultAgentFor(pathname: string, role: DockRole): DockAgent {
-  if (role === "CLIENT") return "HIRING";
-  const top = subPath(pathname).split("/")[0];
-  if (top === "earnings" || top === "invoices") return "TREASURY";
-  if (top === "projects" || top === "quotes") return "PROJECTS";
-  if (top === "services") return "PROFILE";
-  return "ASSISTANT";
+export function defaultAgentFor(_pathname: string, role: DockRole): DockAgent {
+  return role === "CLIENT" ? "HIRING" : "PROFILE";
 }
 
-/** Service id when the page is a service's editor (`/freelancer/<id>/services/<serviceId>`). */
-export function serviceIdFor(pathname: string): string | undefined {
+/** Project id when a freelancer is looking at one project (`/freelancer/<id>/board/<projectId>`). */
+export function projectIdFor(pathname: string): string | undefined {
   const parts = subPath(pathname).split("/");
-  return parts[0] === "services" && parts[1] ? parts[1] : undefined;
+  return parts[0] === "board" && parts[1] ? parts[1] : undefined;
 }
 
 /**
  * Where an open conversation is remembered in the browser, so leaving a page and coming back resumes it.
- * One per agent, and per service or scope for the Profile agent (a service's own chat, the "new service" chat),
- * or per market for clients.
+ * One per agent, and per project for the Freelancer Agent (a project's own chat), or per market for clients.
  */
 export function chatStorageKey(agent: DockAgent, subjectId?: string, resumeKey?: string): string {
   return `globalgig.chat.${agent}.${subjectId ?? "-"}.${resumeKey ?? "-"}`;

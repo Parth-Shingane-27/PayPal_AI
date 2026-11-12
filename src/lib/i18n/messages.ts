@@ -2,6 +2,7 @@ import { EXTRA } from "./messages-extra";
 import { GIG, GIG_EN } from "./messages-gig";
 import { GIG_CLIENT, GIG_CLIENT_EN } from "./messages-gig-client";
 import { GIG_FREELANCER, GIG_FREELANCER_EN } from "./messages-gig-freelancer";
+import { GIG_PROJECTS, GIG_PROJECTS_EN } from "./messages-gig-projects";
 import { GIG_SHARED, GIG_SHARED_EN } from "./messages-gig-shared";
 
 /**
@@ -254,7 +255,7 @@ const baseEn = {
 } as const;
 
 /** GlobalGig strings override the base ones with the same key (e.g. login.title). */
-const en = { ...baseEn, ...GIG_EN, ...GIG_SHARED_EN, ...GIG_FREELANCER_EN, ...GIG_CLIENT_EN };
+const en = { ...baseEn, ...GIG_EN, ...GIG_SHARED_EN, ...GIG_FREELANCER_EN, ...GIG_CLIENT_EN, ...GIG_PROJECTS_EN };
 export type MessageKey = keyof typeof en;
 type Dict = Partial<Record<MessageKey, string>>;
 
@@ -783,10 +784,10 @@ const it: Dict = {
 
 export const DICTIONARIES: Record<"en" | "hi" | "ja" | "de" | "fr" | "es" | "it", Dict> = {
   en,
-  hi: { ...hi, ...EXTRA.hi, ...GIG.hi, ...GIG_SHARED.hi, ...GIG_FREELANCER.hi, ...GIG_CLIENT.hi },
-  ja: { ...ja, ...EXTRA.ja, ...GIG.ja, ...GIG_SHARED.ja, ...GIG_FREELANCER.ja, ...GIG_CLIENT.ja },
-  de: { ...de, ...EXTRA.de, ...GIG.de, ...GIG_SHARED.de, ...GIG_FREELANCER.de, ...GIG_CLIENT.de },
-  fr: { ...fr, ...EXTRA.fr, ...GIG.fr, ...GIG_SHARED.fr, ...GIG_FREELANCER.fr, ...GIG_CLIENT.fr },
-  es: { ...es, ...EXTRA.es, ...GIG.es, ...GIG_SHARED.es, ...GIG_FREELANCER.es, ...GIG_CLIENT.es },
-  it: { ...it, ...EXTRA.it, ...GIG.it, ...GIG_SHARED.it, ...GIG_FREELANCER.it, ...GIG_CLIENT.it },
+  hi: { ...hi, ...EXTRA.hi, ...GIG.hi, ...GIG_SHARED.hi, ...GIG_FREELANCER.hi, ...GIG_CLIENT.hi, ...GIG_PROJECTS.hi },
+  ja: { ...ja, ...EXTRA.ja, ...GIG.ja, ...GIG_SHARED.ja, ...GIG_FREELANCER.ja, ...GIG_CLIENT.ja, ...GIG_PROJECTS.ja },
+  de: { ...de, ...EXTRA.de, ...GIG.de, ...GIG_SHARED.de, ...GIG_FREELANCER.de, ...GIG_CLIENT.de, ...GIG_PROJECTS.de },
+  fr: { ...fr, ...EXTRA.fr, ...GIG.fr, ...GIG_SHARED.fr, ...GIG_FREELANCER.fr, ...GIG_CLIENT.fr, ...GIG_PROJECTS.fr },
+  es: { ...es, ...EXTRA.es, ...GIG.es, ...GIG_SHARED.es, ...GIG_FREELANCER.es, ...GIG_CLIENT.es, ...GIG_PROJECTS.es },
+  it: { ...it, ...EXTRA.it, ...GIG.it, ...GIG_SHARED.it, ...GIG_FREELANCER.it, ...GIG_CLIENT.it, ...GIG_PROJECTS.it },
 };

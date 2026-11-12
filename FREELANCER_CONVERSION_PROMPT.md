@@ -1,5 +1,7 @@
 # Prompt: Convert GlobalCart into a cross-border freelance marketplace
 
+> **Historical.** This was the prompt for the first conversion (services, packages, four agents). The product has since been reduced to clients who post projects and freelancers who send proposals, with two agents; see [ps.md](ps.md), [README.md](README.md) and [architecture.md](architecture.md) for the current design.
+
 > Paste everything below the line into Claude Code, run from the `PayPal_AI/` directory.
 
 ---

@@ -2,7 +2,7 @@ import type { Severity } from "@/generated/prisma/client";
 
 /** What a detector reports. The fingerprint is `${type}:${subject}` and is stable across runs. */
 export type Detection = {
-  agent: "TREASURY" | "PROJECTS";
+  agent: "PROFILE";
   type: string;
   subject: string;
   severity: Severity;

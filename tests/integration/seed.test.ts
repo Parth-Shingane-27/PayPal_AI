@@ -13,10 +13,10 @@ import { runSeed } from "../../prisma/seed";
 describe("db:seed", () => {
   it("writes ~120 contracts and ~300 milestones in every state, all consistent", { timeout: 120_000 }, async () => {
     const r = await runSeed({ log: false });
-    expect(r).toMatchObject({ freelancers: 10, clients: 10, services: 40 });
+    expect(r).toMatchObject({ freelancers: 10, clients: 10 });
     expect(r.contracts).toBe(120);
     expect(r.milestones).toBeGreaterThanOrEqual(270);
-    expect(r.milestones).toBeLessThanOrEqual(360);
+    expect(r.milestones).toBeLessThanOrEqual(420);
     for (const s of MILESTONE_STATES) expect(r.states[s], s).toBeGreaterThan(0);
     expect(r.invoices).toBe(r.states.ACCEPTED);
 
@@ -50,8 +50,12 @@ describe("db:seed", () => {
     expect(problems).toEqual([]);
 
     // Demo fixtures the agents and detectors rely on.
-    expect(await prisma.servicePage.count({ where: { locale: "hi-IN", status: "PUBLISHED" } })).toBeGreaterThanOrEqual(10);
-    expect(await prisma.quote.count({ where: { status: "REQUESTED", requested_at: { lt: new Date(Date.now() - 24 * 3_600_000) } } })).toBeGreaterThan(0);
+    // The project board: open projects with proposals waiting, plus drafts the client has not posted.
+    expect(await prisma.brief.count({ where: { status: "OPEN" } })).toBeGreaterThanOrEqual(5);
+    expect(await prisma.brief.count({ where: { status: "DRAFT" } })).toBeGreaterThan(0);
+    expect(await prisma.quote.count({ where: { status: "SENT", brief: { status: "OPEN" } } })).toBeGreaterThan(0);
+    // A project closes when its proposal is accepted, and every contract comes from an accepted or sent proposal.
+    expect(await prisma.contract.count({ where: { quote_id: null } })).toBe(0);
     expect(await prisma.milestone.count({ where: { state: "DELIVERED", auto_release_at: { lt: new Date(Date.now() + 24 * 3_600_000) } } })).toBeGreaterThan(0);
     expect(await prisma.milestone.count({ where: { revision_count: { gte: 3 } } })).toBeGreaterThan(0);
     expect(await prisma.agentAction.count({ where: { status: "PENDING_APPROVAL", milestone_refund_id: { not: null } } })).toBe(1);

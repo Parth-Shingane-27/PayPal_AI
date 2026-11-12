@@ -7,14 +7,14 @@ import { checkOrigin, errorBody, json, readBody } from "@/server/http";
 const bodySchema = z.object({
   text: z.string().min(1).max(MAX_USER_MESSAGE_CHARS),
   session_id: z.uuid().nullish(),
-  agent: z.enum(["PROFILE", "TREASURY", "PROJECTS"]).nullish(),
-  service_id: z.uuid().nullish(),
+  /** The project the person is looking at. */
+  project_id: z.uuid().nullish(),
 });
 
 /**
- * Chat over Server-Sent Events. Events: session, routed, model_call,
+ * Chat over Server-Sent Events. Events: session, model_call,
  * text_delta (a piece of the reply as it is written), tool_started,
- * tool_finished, handoff, then one `result` (or `error`). The `result` always
+ * tool_finished, then one `result` (or `error`). The `result` always
  * carries the complete reply, so a client may ignore text_delta.
  * Identity and market come from the signed session cookie only.
  */
@@ -47,9 +47,8 @@ export async function POST(req: Request): Promise<Response> {
           owner,
           text: body.text,
           sessionId: body.session_id,
-          agent: principal.role === "FREELANCER" ? body.agent : null,
           marketLocale: principal.role === "CLIENT" ? principal.market : null,
-          serviceId: principal.role === "FREELANCER" ? body.service_id : null,
+          projectId: body.project_id,
           onEvent: (e) => send(e.type, e),
         });
         send("result", result);

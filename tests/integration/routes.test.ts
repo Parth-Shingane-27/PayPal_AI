@@ -5,13 +5,13 @@ import { POST as marketPOST } from "@/app/api/client/market/route";
 import { POST as chatPOST } from "@/app/api/chat/route";
 import { POST as fundPOST } from "@/app/api/contracts/[id]/fund/route";
 import { POST as capturePOST } from "@/app/api/milestone-checkout/capture/route";
-import { GET as serviceGET } from "@/app/api/services/[id]/route";
-import { POST as servicesPOST } from "@/app/api/services/route";
-import { POST as publishPOST } from "@/app/api/service-pages/[id]/publish/route";
+import { POST as briefsPOST } from "@/app/api/briefs/route";
+import { POST as publishPOST } from "@/app/api/briefs/[id]/publish/route";
+import { POST as proposalsPOST } from "@/app/api/briefs/[id]/proposals/route";
+import { GET as boardGET } from "@/app/api/projects/open/route";
 import { SESSION_COOKIE, signSession, verifySession } from "@/server/auth";
-import { prisma } from "@/server/db";
 import { paypal } from "@/server/services/audit";
-import { makeClient, makeContract, makeFreelancer, makeService, makeServicePage, resetDb } from "../helpers/db";
+import { makeBrief, makeClient, makeContract, makeFreelancer, resetDb } from "../helpers/db";
 
 // The chat route uses the live model client; replace it with a scripted one.
 const script = vi.hoisted(() => ({ steps: [] as unknown[], requests: [] as unknown[] }));
@@ -99,7 +99,7 @@ describe("auth", () => {
 
   it("refuses cross-site mutations", async () => {
     const f = await makeFreelancer();
-    const res = await servicesPOST(req("POST", "/api/services", { cookie: cookie("FREELANCER", f.id), body: {}, origin: "https://evil.example" }), undefined);
+    const res = await briefsPOST(req("POST", "/api/briefs", { cookie: cookie("CLIENT", f.id), body: {}, origin: "https://evil.example" }), undefined);
     expect(res.status).toBe(403);
   });
 
@@ -112,24 +112,39 @@ describe("auth", () => {
   });
 });
 
-describe("freelancer routes", () => {
-  it("reads a service back and hides it from other freelancers", async () => {
+describe("project routes", () => {
+  it("shows the board to freelancers only, and only OPEN projects", async () => {
     const f = await makeFreelancer();
-    const svc = await makeService(f.id);
-    const own = await serviceGET(req("GET", `/api/services/${svc.id}`, { cookie: cookie("FREELANCER", f.id) }), params(svc.id));
-    expect(own.status).toBe(200);
-    const other = await makeFreelancer();
-    expect((await serviceGET(req("GET", `/api/services/${svc.id}`, { cookie: cookie("FREELANCER", other.id) }), params(svc.id))).status).toBe(404);
+    const client = await makeClient();
+    const open = await makeBrief(client.id, { title: "Open one" });
+    await makeBrief(client.id, { title: "Draft one", status: "DRAFT" });
+    const res = await boardGET(req("GET", "/api/projects/open", { cookie: cookie("FREELANCER", f.id) }), undefined);
+    expect(res.status).toBe(200);
+    expect((await res.json()).projects.map((p: { brief_id: string }) => p.brief_id)).toEqual([open.id]);
+    expect((await boardGET(req("GET", "/api/projects/open", { cookie: cookie("CLIENT", client.id) }), undefined)).status).toBe(403);
+    expect((await boardGET(req("GET", "/api/projects/open"), undefined)).status).toBe(401);
   });
 
-  it("publishes a draft page (the freelancer's click), and a client cannot", async () => {
+  it("publishes a draft project (the client's click), and a freelancer cannot", async () => {
     const f = await makeFreelancer();
-    const svc = await makeService(f.id);
-    const page = await makeServicePage(svc, { status: "DRAFT", locale: "de-DE" });
     const client = await makeClient();
-    expect((await publishPOST(req("POST", `/api/service-pages/${page.id}/publish`, { cookie: cookie("CLIENT", client.id) }), params(page.id))).status).toBe(403);
-    const res = await publishPOST(req("POST", `/api/service-pages/${page.id}/publish`, { cookie: cookie("FREELANCER", f.id) }), params(page.id));
-    expect(await res.json()).toMatchObject({ page_id: page.id, status: "PUBLISHED" });
+    const other = await makeClient();
+    const draft = await makeBrief(client.id, { status: "DRAFT" });
+    expect((await publishPOST(req("POST", `/api/briefs/${draft.id}/publish`, { cookie: cookie("FREELANCER", f.id) }), params(draft.id))).status).toBe(403);
+    expect((await publishPOST(req("POST", `/api/briefs/${draft.id}/publish`, { cookie: cookie("CLIENT", other.id) }), params(draft.id))).status).toBe(404);
+    const res = await publishPOST(req("POST", `/api/briefs/${draft.id}/publish`, { cookie: cookie("CLIENT", client.id) }), params(draft.id));
+    expect(await res.json()).toMatchObject({ brief_id: draft.id, status: "OPEN" });
+  });
+
+  it("takes a proposal from a freelancer on an open project, and not from a client", async () => {
+    const f = await makeFreelancer();
+    const client = await makeClient();
+    const brief = await makeBrief(client.id);
+    const body = { total: "600", delivery_days: 14, revisions: 2, scope: "Three concepts and final files." };
+    expect((await proposalsPOST(req("POST", `/api/briefs/${brief.id}/proposals`, { cookie: cookie("CLIENT", client.id), body }), params(brief.id))).status).toBe(403);
+    const res = await proposalsPOST(req("POST", `/api/briefs/${brief.id}/proposals`, { cookie: cookie("FREELANCER", f.id), body }), params(brief.id));
+    expect(res.status).toBe(201);
+    expect(await res.json()).toMatchObject({ status: "SENT", total: { amount_minor: 60_000 } });
   });
 });
 
@@ -170,15 +185,8 @@ describe("chat over SSE", () => {
   it("requires a session and validates input before streaming", async () => {
     const f = await makeFreelancer();
     expect((await chatPOST(req("POST", "/api/chat", { body: { text: "hi" } }))).status).toBe(401);
-    const res = await chatPOST(req("POST", "/api/chat", { cookie: cookie("FREELANCER", f.id), body: { text: "x".repeat(4001), agent: "TREASURY" } }));
+    const res = await chatPOST(req("POST", "/api/chat", { cookie: cookie("FREELANCER", f.id), body: { text: "x".repeat(4001) } }));
     expect(res.status).toBe(400);
     expect(script.requests).toHaveLength(0);
-  });
-
-  it("streams a readable error event for an old GlobalCart agent name instead of calling the model", async () => {
-    const f = await makeFreelancer();
-    const res = await chatPOST(req("POST", "/api/chat", { cookie: cookie("FREELANCER", f.id), body: { text: "hi", agent: "LISTING" } }));
-    expect(res.status).toBe(400);
-    expect(await prisma.agentSession.count()).toBe(0);
   });
 });
