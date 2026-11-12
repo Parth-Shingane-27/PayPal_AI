@@ -12,13 +12,13 @@ import { gigMarketplaceStats } from "@/server/services/gig/dashboards";
 export const dynamic = "force-dynamic";
 
 const DESCRIPTION =
-  "GlobalGig lets freelancers sell their services to clients in 11 markets. AI writes each service page in the client's language and sets rates per market, clients pay each milestone in their own currency through PayPal, and the money is held until they accept the work.";
+  "On GlobalGig, clients post projects and freelancers from other countries send proposals. Everyone works in their own language, clients pay each milestone in their own currency through PayPal, and the money is held until they accept the work.";
 
 export const metadata: Metadata = {
-  title: { absolute: "GlobalGig: freelance for clients in eleven countries, paid safely by milestone" },
+  title: { absolute: "GlobalGig: post a project, get proposals from abroad, pay safely by milestone" },
   description: DESCRIPTION,
   alternates: { canonical: "/" },
-  openGraph: { title: "GlobalGig: freelance for clients in eleven countries, paid safely by milestone", description: DESCRIPTION, url: "/" },
+  openGraph: { title: "GlobalGig: post a project, get proposals from abroad, pay safely by milestone", description: DESCRIPTION, url: "/" },
 };
 
 const STEP_KEYS = [
@@ -52,21 +52,6 @@ export default async function Home() {
       description: DESCRIPTION,
     },
     { "@context": "https://schema.org", "@type": "WebSite", name: "GlobalGig", url: base, inLanguage: "en" },
-    {
-      "@context": "https://schema.org",
-      "@type": "ItemList",
-      name: "Featured services from GlobalGig freelancers",
-      itemListElement: s.featured.map((f, i) => ({
-        "@type": "ListItem",
-        position: i + 1,
-        item: {
-          "@type": "Service",
-          name: f.title,
-          provider: { "@type": "Person", name: f.freelancer },
-          offers: { "@type": "Offer", price: (f.from_price.amount_minor / 100).toFixed(2), priceCurrency: f.from_price.currency },
-        },
-      })),
-    },
     {
       "@context": "https://schema.org",
       "@type": "FAQPage",
@@ -175,18 +160,18 @@ export default async function Home() {
         <section id="makers" aria-labelledby="makers-title" className="border-y border-rule bg-sheet">
           <div className="mx-auto max-w-6xl px-4 py-16 md:px-6">
             <h2 id="makers-title" className="font-display text-3xl font-bold tracking-[-0.025em] md:text-4xl">
-              {t("land.makersTitle", { n: s.freelancers, c: new Set(s.featured.map((f) => f.country)).size })}
+              {t("land.makersTitle", { n: s.open_projects, c: new Set(s.featured.map((f) => f.country)).size })}
             </h2>
             <ul className="mt-10 grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-5">
               {s.featured.map((f) => (
-                <li key={f.page_id} className="group flex flex-col gap-2 rounded-[10px] border border-rule bg-paper p-4 transition-colors hover:border-accent">
+                <li key={f.project_id} className="group flex flex-col gap-2 rounded-[10px] border border-rule bg-paper p-4 transition-colors hover:border-accent">
                   <p className="flex items-center gap-1.5 text-xs text-ink-3">
                     <CountryStamp country={f.country} />
-                    <span className="truncate font-medium text-ink-2">{f.freelancer}</span>
+                    <span className="truncate font-medium text-ink-2">{f.client}</span>
                   </p>
-                  <h3 className="text-sm leading-snug font-semibold">{f.title}</h3>
-                  <p className="text-xs text-ink-3">{f.category}</p>
-                  <p className="num mt-auto pt-2 font-display font-semibold">{t("land.from", { price: f.from_price.display })}</p>
+                  <h3 className="text-sm leading-snug font-semibold">{f.title.replace(/^EVAL /, "")}</h3>
+                  <p className="text-xs text-ink-3">{f.skills.join(", ")}</p>
+                  {f.budget && <p className="num mt-auto pt-2 font-display font-semibold">{t("land.from", { price: f.budget.display })}</p>}
                 </li>
               ))}
             </ul>

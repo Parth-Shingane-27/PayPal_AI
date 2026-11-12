@@ -1,111 +1,106 @@
 import Link from "next/link";
 import { GigFindingsFeed } from "@/components/gig/GigFindingsFeed";
-import { ReleasedByMonthChart } from "@/components/gig/freelancer/ReleasedByMonthChart";
+import { MilestoneStamp } from "@/components/gig/MilestoneStamp";
 import { Panel, SectionHeading } from "@/components/ui";
-import { getT } from "@/lib/i18n/server";
+import { localeOf } from "@/lib/i18n/core";
+import { getT, getUiLang } from "@/lib/i18n/server";
 import { freelancerPath } from "@/lib/routes";
 import { freelancerPage } from "@/server/page-auth";
-import { freelancerOverview } from "@/server/services/gig/dashboards";
+import { freelancerHome } from "@/server/services/gig/dashboards";
 
 export async function generateMetadata() {
   const t = await getT();
   return { title: t("nav.overview") };
 }
 
-function Figure({ label, value, children, href }: { label: string; value: string; children?: React.ReactNode; href?: string }) {
-  const body = (
-    <>
-      <dt className="text-sm text-ink-3">{label}</dt>
-      <dd className="num mt-1 font-display text-[1.7rem] leading-tight font-semibold tracking-[-0.02em] text-ink [font-stretch:90%]">{value}</dd>
-      <dd className="mt-0.5 min-h-5 text-xs text-ink-3">{children}</dd>
-    </>
-  );
-  return (
-    <div className="bg-sheet px-4 py-3">
-      {href ? (
-        <Link href={href} className="block min-h-11 rounded-sm hover:text-accent">
-          {body}
-        </Link>
-      ) : (
-        body
-      )}
-    </div>
-  );
-}
+const primary = "inline-flex min-h-11 items-center rounded-md bg-accent px-5 font-semibold text-sheet";
+const secondary = "inline-flex min-h-11 items-center rounded-md border border-rule-strong px-4 text-sm font-medium hover:border-accent hover:text-accent";
 
-export default async function FreelancerOverview({ params }: { params: Promise<{ freelancerId: string }> }) {
+/** One screen, four blocks: money, what is due next, proposals, and projects that match. */
+export default async function FreelancerHome({ params }: { params: Promise<{ freelancerId: string }> }) {
   const { freelancerId } = await params;
   const f = await freelancerPage(freelancerId);
   const base = freelancerPath(f.freelancerId);
   const t = await getT();
-  const o = await freelancerOverview(f.freelancerId);
-  const totals = o.totals_at_reference_rates;
+  const uiLocale = localeOf(await getUiLang());
+  const h = await freelancerHome(f.freelancerId);
+  const totals = h.totals_at_reference_rates;
+  const date = (iso: string) => new Intl.DateTimeFormat(uiLocale, { dateStyle: "medium", timeZone: "UTC" }).format(new Date(`${iso}T00:00:00Z`));
+  const matches = h.new_matching_projects;
 
   return (
     <div className="flex flex-col gap-6">
-      <header>
-        <p className="text-sm text-ink-3">{t("fl.ov.eyebrow", { currency: o.home_currency })}</p>
-        <h1 className="font-display text-[2rem] leading-tight font-bold tracking-[-0.025em] text-ink md:text-[2.4rem]">{t("fl.ov.title", { name: f.name.split(" ")[0] ?? f.name })}</h1>
+      <header className="flex flex-wrap items-end justify-between gap-4">
+        <h1 className="font-display text-[2rem] leading-tight font-bold tracking-[-0.025em] text-ink md:text-[2.4rem]">{t("pj.fd.hello", { name: f.name.split(" ")[0] ?? f.name })}</h1>
+        <Link href={`${base}/board`} className={primary}>
+          {t("pj.fd.browse")}
+        </Link>
       </header>
 
-      <dl className="grid gap-px overflow-hidden rounded-[10px] border border-rule bg-rule cq-sm:grid-cols-2 cq-lg:grid-cols-4">
-        <Figure label={t("fl.ov.available")} value={totals.available.display} href={`${base}/earnings`}>
-          {t("fl.ov.atReference", { currency: o.home_currency })}
-        </Figure>
-        <Figure label={t("fl.ov.inHolding")} value={totals.in_holding.display} href={`${base}/earnings`}>
-          {t("fl.ov.atReference", { currency: o.home_currency })}
-        </Figure>
-        <Figure label={t("fl.ov.active")} value={String(o.active_milestones)} href={`${base}/projects`}>
-          {o.due_within_48h > 0 ? <span className="font-semibold text-alert-ink">{t("fl.ov.dueSoon", { n: o.due_within_48h })}</span> : t("fl.ov.nothingDue")}
-        </Figure>
-        <Figure label={t("fl.ov.quotes")} value={String(o.quote_requests_waiting)} href={`${base}/quotes`}>
-          {o.quote_requests_waiting > 0 ? t("fl.ov.quotesHint") : t("fl.ov.quotesNone")}
-        </Figure>
-      </dl>
-
-      <GigFindingsFeed />
-
-      <div className="grid gap-6 cq-lg:grid-cols-[minmax(0,1fr)_minmax(0,1.35fr)]">
-        <Panel labelledBy="balances-title">
-          <SectionHeading id="balances-title" title={t("fl.ov.byCurrency")} aside={<Link href={`${base}/earnings`} className="text-accent hover:underline">{t("fl.ov.openEarnings")}</Link>} />
-          {o.balances.length === 0 ? (
-            <p className="text-sm text-ink-3">{t("fl.earn.none")}</p>
-          ) : (
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-rule text-left text-xs text-ink-3">
-                  <th scope="col" className="py-2 pr-3 font-medium">
-                    {t("col.currency")}
-                  </th>
-                  <th scope="col" className="py-2 pr-3 text-right font-medium">
-                    {t("fl.ov.available")}
-                  </th>
-                  <th scope="col" className="py-2 text-right font-medium">
-                    {t("fl.ov.inHolding")}
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {o.balances.map((b) => (
-                  <tr key={b.currency} className="border-b border-rule last:border-0">
-                    <th scope="row" className="py-2.5 pr-3 text-left font-semibold">
-                      {b.currency}
-                    </th>
-                    <td className="num py-2.5 pr-3 text-right font-semibold">{b.available.display}</td>
-                    <td className="num py-2.5 text-right text-ink-2">{b.in_holding.display}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-          <p className="mt-3 text-xs text-ink-3">{t("fl.earn.holdingExplain")}</p>
+      <div className="grid gap-4 cq-xl:grid-cols-[minmax(0,5fr)_minmax(0,7fr)]">
+        <Panel labelledBy="money-title">
+          <SectionHeading id="money-title" title={t("pj.fd.money")} />
+          <dl className="grid grid-cols-2 gap-4">
+            <div>
+              <dt className="text-sm text-ink-3">{t("fl.ov.available")}</dt>
+              <dd className="num mt-1 font-display text-[1.7rem] leading-tight font-semibold tracking-[-0.02em] [font-stretch:90%]">{totals.available.display}</dd>
+            </div>
+            <div>
+              <dt className="text-sm text-ink-3">{t("fl.ov.inHolding")}</dt>
+              <dd className="num mt-1 font-display text-[1.7rem] leading-tight font-semibold tracking-[-0.02em] [font-stretch:90%]">{totals.in_holding.display}</dd>
+            </div>
+          </dl>
+          <p className="mt-2 text-xs text-ink-3">{t("fl.ov.atReference", { currency: h.home_currency })}</p>
+          <p className="mt-3 text-sm text-ink-2">{t("pj.fd.holdNote")}</p>
+          <div className="mt-4">
+            <Link href={`${base}/earnings`} className={h.can_request_payout ? primary : secondary}>
+              {t("pj.fd.payout")}
+            </Link>
+          </div>
         </Panel>
-        <Panel labelledBy="released-title">
-          <SectionHeading id="released-title" title={t("fl.ov.releasedTitle")} aside={t("fl.ov.atReference", { currency: o.home_currency })} />
-          <ReleasedByMonthChart months={o.released_by_month} currency={o.home_currency} title={t("fl.ov.releasedTitle")} />
+
+        <Panel labelledBy="next-title">
+          <SectionHeading id="next-title" title={t("pj.fd.nextUp")} aside={<Link href={`${base}/projects`} className="text-accent hover:underline">{t("cl.dash.allProjects")}</Link>} />
+          {h.next_up.length === 0 ? (
+            <p className="text-ink-3">{t("pj.fd.nextNone")}</p>
+          ) : (
+            <ul className="flex flex-col divide-y divide-rule">
+              {h.next_up.map((m) => (
+                <li key={m.milestone_id}>
+                  <Link href={`${base}/projects/${m.contract_id}`} className="flex min-h-11 flex-wrap items-center justify-between gap-x-4 gap-y-1 py-3 hover:text-accent">
+                    <span className="min-w-0">
+                      <span className="block truncate font-medium">{m.contract}</span>
+                      <span className="block truncate text-sm text-ink-3">
+                        {m.milestone} · {m.client}
+                      </span>
+                    </span>
+                    <span className="flex items-center gap-3 text-sm">
+                      <MilestoneStamp state={m.state} />
+                      <span className="num text-ink-2">{m.due_date ? t("pj.fd.due", { date: date(m.due_date) }) : t("pj.fd.noDate")}</span>
+                    </span>
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          )}
         </Panel>
       </div>
-      <p className="text-xs text-ink-3">{t("fl.ov.footnote")}</p>
+
+      <div className="grid gap-4 cq-lg:grid-cols-2">
+        <Panel labelledBy="proposals-title">
+          <SectionHeading id="proposals-title" title={t("pj.fd.proposals")} aside={<Link href={`${base}/board?tab=mine`} className="text-accent hover:underline">{t("pj.fd.open")}</Link>} />
+          <ul className="flex flex-col gap-1 text-ink-2">
+            <li>{t("pj.fd.waiting", { n: h.proposals_waiting })}</li>
+            <li>{t("pj.fd.won", { n: h.proposals_won_this_month })}</li>
+          </ul>
+        </Panel>
+        <Panel labelledBy="matches-title">
+          <SectionHeading id="matches-title" title={t("pj.fd.matches")} aside={<Link href={`${base}/board`} className="text-accent hover:underline">{t("pj.fd.open")}</Link>} />
+          <p className="text-ink-2">{matches === 0 ? t("pj.fd.matchesNone") : matches === 1 ? t("pj.fd.matchesOne") : t("pj.fd.matchesN", { n: matches })}</p>
+        </Panel>
+      </div>
+
+      <GigFindingsFeed />
     </div>
   );
 }

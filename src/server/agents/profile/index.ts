@@ -1,13 +1,12 @@
 import type { AgentSpec } from "../runtime";
-import { handoffTool } from "../shared-tools";
 import { SYSTEM_PROMPT } from "./system-prompt";
 import { PROFILE_TOOLS } from "./tools";
 
-/** Profile Agent: services, localized service pages and rates per market. */
+/** Freelancer Agent: find projects, price and draft proposals, and explain balances, fees and payouts. */
 export const profileAgent: AgentSpec = {
   name: "PROFILE",
   system: SYSTEM_PROMPT,
-  tools: [...PROFILE_TOOLS, handoffTool],
-  maxModelCalls: 40,
-  timeoutMs: 5 * 60_000,
+  tools: PROFILE_TOOLS,
+  maxModelCalls: 20,
+  timeoutMs: 3 * 60_000,
 };

@@ -1,18 +1,15 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { prisma } from "@/server/db";
-import { makeClient, makeContract, makeFreelancer, makeService, resetDb } from "../helpers/db";
+import { makeClient, makeContract, makeFreelancer, resetDb } from "../helpers/db";
 
 /** The GlobalGig tables exist with the constraints the services will rely on. */
 
 beforeEach(resetDb);
 
 describe("GlobalGig schema", () => {
-  it("stores a service with three packages and a contract with milestones and payments", async () => {
+  it("stores a contract with milestones and payments", async () => {
     const f = await makeFreelancer({ country: "IN", currency: "USD", locale: "hi-IN", timezone: "Asia/Kolkata" });
     const c = await makeClient({ locale: "de-DE", country: "DE", company_name: "Nordlicht GmbH", tax_id: "DE123456789" });
-    const svc = await makeService(f.id);
-    expect(svc.packages.map((p) => p.tier).sort()).toEqual(["BASIC", "PREMIUM", "STANDARD"]);
-
     const { contract, milestones } = await makeContract(f.id, c.id, [
       { amount_minor: 20_000, state: "ACCEPTED" },
       { amount_minor: 30_000, state: "DELIVERED" },
@@ -59,13 +56,11 @@ describe("GlobalGig schema", () => {
     await invoice(milestones[1]!.milestone.id, 2);
   });
 
-  it("keeps vector columns for service pages and freelancer skills", async () => {
-    const cols = await prisma.$queryRaw<{ table_name: string; udt_name: string }[]>`
-      SELECT table_name, udt_name FROM information_schema.columns
-      WHERE column_name = 'embedding' AND table_name IN ('service_pages', 'freelancers') ORDER BY table_name`;
-    expect(cols).toEqual([
-      { table_name: "freelancers", udt_name: "vector" },
-      { table_name: "service_pages", udt_name: "vector" },
-    ]);
+  it("has no listing tables or embedding columns left", async () => {
+    const tables = await prisma.$queryRaw<{ tablename: string }[]>`SELECT tablename FROM pg_tables WHERE schemaname = 'public'`;
+    const names = tables.map((t) => t.tablename);
+    for (const gone of ["services", "service_packages", "service_pages", "service_page_prices", "market_rate_research", "service_page_daily_stats"]) expect(names, gone).not.toContain(gone);
+    const cols = await prisma.$queryRaw<{ table_name: string }[]>`SELECT table_name FROM information_schema.columns WHERE column_name = 'embedding' AND table_schema = 'public'`;
+    expect(cols).toEqual([]);
   });
 });

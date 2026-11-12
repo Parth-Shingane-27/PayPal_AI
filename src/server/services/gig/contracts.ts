@@ -1,4 +1,4 @@
-import type { ContractStatus, MilestoneState, PackageTier, Prisma } from "@/generated/prisma/client";
+import type { ContractStatus, MilestoneState, Prisma } from "@/generated/prisma/client";
 import { prisma } from "../../db";
 import { checkMilestonePlan, MAX_MILESTONES, splitEvenly } from "../../domain/milestones";
 import { money, parseDecimal } from "../../domain/money";
@@ -8,8 +8,8 @@ import { type GigOwner, lockClient, ownerWhere } from "./owner";
 
 /**
  * Contracts and milestone plans. The price is fixed by the freelancer (a sent
- * quote) or by a published package in the client's market; a plan only
- * splits that total into milestones, and code checks the split adds up.
+ * proposal); a plan only splits that total into milestones, and code checks
+ * the split adds up.
  *
  * propose_milestone_plan writes a DRAFT contract (milestones waiting to be funded):
  * nothing is charged until the client approves milestone 1 in PayPal.
@@ -25,14 +25,12 @@ export type PlanMilestoneInput = {
   due_in_days?: number | null;
 };
 
-export type PlanSource = { quoteId: string } | { servicePageId: string; tier: PackageTier };
+export type PlanSource = { quoteId: string };
 
 type Priced = {
-  source: "QUOTE" | "PACKAGE";
+  source: "QUOTE";
   freelancerId: string;
-  serviceId: string | null;
-  packageId: string | null;
-  quoteId: string | null;
+  quoteId: string;
   title: string;
   scope: string;
   currency: string;
@@ -41,49 +39,21 @@ type Priced = {
   deliveryDays: number;
 };
 
-async function priceOf(clientId: string, locale: string, src: PlanSource, now: Date): Promise<Priced> {
-  if ("quoteId" in src) {
-    const q = await prisma.quote.findFirst({ where: { id: src.quoteId, client_id: clientId }, include: { service: { select: { title: true } }, brief: { select: { title: true } } } });
-    if (!q) throw notFound("Quote");
-    if (q.status !== "SENT" || q.total_minor === null) {
-      throw new AppError("CONFLICT", q.status === "REQUESTED" ? "The freelancer has not sent a price for this quote yet." : `This quote is ${q.status.toLowerCase()}.`);
-    }
-    if (q.expires_at && q.expires_at < now) throw new AppError("CONFLICT", "This quote has expired. Ask the freelancer for a new one.");
-    return {
-      source: "QUOTE",
-      freelancerId: q.freelancer_id,
-      serviceId: q.service_id,
-      packageId: q.package_id,
-      quoteId: q.id,
-      title: (q.brief?.title ?? q.service?.title ?? "Custom project").slice(0, 140),
-      scope: q.scope ?? q.request_message,
-      currency: q.currency,
-      totalMinor: q.total_minor,
-      revisions: q.revisions ?? 1,
-      deliveryDays: q.delivery_days ?? 14,
-    };
-  }
-  const page = await prisma.servicePage.findFirst({
-    where: { id: src.servicePageId, status: "PUBLISHED" },
-    include: { service: { include: { packages: { where: { tier: src.tier } } } }, prices: true },
-  });
-  if (!page) throw notFound("Service");
-  if (page.locale !== locale) throw new AppError("INVALID_INPUT", "This service page is for another market. Open the page for your market to buy a package.");
-  const pkg = page.service.packages[0];
-  const price = pkg && page.prices.find((p) => p.package_id === pkg.id);
-  if (!pkg || !price) throw new AppError("INVALID_INPUT", `This service has no ${src.tier.toLowerCase()} package in your market.`);
+async function priceOf(clientId: string, src: PlanSource, now: Date): Promise<Priced> {
+  const q = await prisma.quote.findFirst({ where: { id: src.quoteId, client_id: clientId }, include: { brief: { select: { title: true } } } });
+  if (!q) throw notFound("Proposal");
+  if (q.status !== "SENT" || q.total_minor === null) throw new AppError("CONFLICT", `This proposal is ${q.status.toLowerCase()}.`);
+  if (q.expires_at && q.expires_at < now) throw new AppError("CONFLICT", "This proposal has expired. Ask the freelancer for a new one.");
   return {
-    source: "PACKAGE",
-    freelancerId: page.freelancer_id,
-    serviceId: page.service_id,
-    packageId: pkg.id,
-    quoteId: null,
-    title: `${page.title}: ${pkg.name}`.slice(0, 140),
-    scope: pkg.scope,
-    currency: page.currency,
-    totalMinor: price.price_minor,
-    revisions: pkg.revisions,
-    deliveryDays: pkg.delivery_days,
+    source: "QUOTE",
+    freelancerId: q.freelancer_id,
+    quoteId: q.id,
+    title: (q.brief?.title ?? "Custom project").slice(0, 140),
+    scope: q.scope ?? q.request_message,
+    currency: q.currency,
+    totalMinor: q.total_minor,
+    revisions: q.revisions ?? 1,
+    deliveryDays: q.delivery_days ?? 14,
   };
 }
 
@@ -104,7 +74,7 @@ function planAmounts(totalMinor: number, currency: string, milestones: PlanMiles
 
 export async function proposeMilestonePlan(o: GigOwner, src: PlanSource, milestones: PlanMilestoneInput[], now = new Date()) {
   if (o.type !== "CLIENT") throw new AppError("FORBIDDEN", "Only the client builds a milestone plan.");
-  const priced = await priceOf(o.clientId, o.locale, src, now);
+  const priced = await priceOf(o.clientId, src, now);
   const amounts = planAmounts(priced.totalMinor, priced.currency, milestones);
   const check = checkMilestonePlan(priced.totalMinor, amounts);
   const m = (minor: number) => money(minor, priced.currency, o.locale);
@@ -124,9 +94,9 @@ export async function proposeMilestonePlan(o: GigOwner, src: PlanSource, milesto
 
   const contract = await prisma.$transaction(async (tx) => {
     await lockClient(tx, o.clientId);
-    // One draft per quote or package: a new plan replaces the old one if nothing was paid.
+    // One draft per proposal: a new plan replaces the old one if nothing was paid.
     const old = await tx.contract.findFirst({
-      where: { client_id: o.clientId, status: "DRAFT", ...(priced.quoteId ? { quote_id: priced.quoteId } : { package_id: priced.packageId, quote_id: null }) },
+      where: { client_id: o.clientId, status: "DRAFT", quote_id: priced.quoteId },
       include: { payments: { select: { status: true } } },
     });
     if (old) {
@@ -141,8 +111,6 @@ export async function proposeMilestonePlan(o: GigOwner, src: PlanSource, milesto
         client_id: o.clientId,
         freelancer_id: priced.freelancerId,
         source: priced.source,
-        service_id: priced.serviceId,
-        package_id: priced.packageId,
         quote_id: priced.quoteId,
         title: priced.title,
         scope: priced.scope,

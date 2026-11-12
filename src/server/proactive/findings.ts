@@ -69,11 +69,10 @@ export async function reconcileFindings(freelancerId: string, detections: Detect
 const SEVERITY_RANK = { HIGH: 0, MEDIUM: 1, LOW: 2 } as const;
 
 /** Visible findings for the feed: not resolved, not dismissed, not currently snoozed. */
-export async function listFindings(freelancerId: string, opts: { agent?: "TREASURY" | "PROJECTS"; now?: Date } = {}): Promise<Finding[]> {
+export async function listFindings(freelancerId: string, opts: { now?: Date } = {}): Promise<Finding[]> {
   const now = opts.now ?? new Date();
   const where: Prisma.FindingWhereInput = {
     freelancer_id: freelancerId,
-    ...(opts.agent ? { agent: opts.agent } : {}),
     OR: [{ status: { in: ["NEW", "SEEN", "ACTED"] } }, { status: "SNOOZED", snoozed_until: { lte: now } }],
   };
   const rows = await prisma.finding.findMany({ where, orderBy: { last_seen_at: "desc" }, take: 50 });
@@ -82,13 +81,6 @@ export async function listFindings(freelancerId: string, opts: { agent?: "TREASU
 
 export async function countNewFindings(freelancerId: string): Promise<number> {
   return prisma.finding.count({ where: { freelancer_id: freelancerId, status: "NEW" } });
-}
-
-/** New (unseen) findings per agent, for the nav badges. */
-export async function newFindingCounts(freelancerId: string): Promise<{ TREASURY: number; PROJECTS: number }> {
-  const rows = await prisma.finding.groupBy({ by: ["agent"], where: { freelancer_id: freelancerId, status: "NEW" }, _count: true });
-  const n = (a: string) => rows.find((r) => r.agent === a)?._count ?? 0;
-  return { TREASURY: n("TREASURY"), PROJECTS: n("PROJECTS") };
 }
 
 /** Another freelancer's id is indistinguishable from a missing one. */

@@ -9,7 +9,7 @@ import { Markdown } from "@/components/Markdown";
 import type { MessageKey } from "@/lib/i18n/messages";
 import { useGigBase } from "./use-gig-base";
 
-export type GigFindingAgent = "TREASURY" | "PROJECTS";
+export type GigFindingAgent = "PROFILE";
 type Finding = {
   id: string;
   agent: GigFindingAgent;
@@ -29,15 +29,14 @@ const action =
   "inline-flex min-h-10 cursor-pointer items-center rounded-md px-3 text-sm font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50";
 
 /**
- * Freelancer only. What the Treasury and Projects agents found on their own
- * checks (GET /api/freelancer/findings), most severe first. Each card can be
+ * Freelancer only. What the Freelancer Agent found on its own checks (GET /api/freelancer/findings), most severe first. Each card can be
  * discussed (opens the assistant panel on that agent, resuming its
  * conversation), snoozed for 7 days or dismissed; "Check now" queues a check.
  * A finding with a drafted action links to `${base}/approvals`. Nothing here moves money.
  *
- *   <GigFindingsFeed agent="TREASURY" />   // omit agent for both
+ *   <GigFindingsFeed />
  */
-export function GigFindingsFeed({ agent }: { agent?: GigFindingAgent }) {
+export function GigFindingsFeed() {
   const { t } = useI18n();
   const base = useGigBase();
   const [items, setItems] = useState<Finding[] | null>(null);
@@ -49,7 +48,7 @@ export function GigFindingsFeed({ agent }: { agent?: GigFindingAgent }) {
 
   useEffect(() => {
     let alive = true;
-    api<{ findings: Finding[] }>(`/api/freelancer/findings${agent ? `?agent=${agent}` : ""}`)
+    api<{ findings: Finding[] }>("/api/freelancer/findings")
       .then((r) => {
         if (!alive) return;
         setItems(r.findings);
@@ -63,7 +62,7 @@ export function GigFindingsFeed({ agent }: { agent?: GigFindingAgent }) {
     return () => {
       alive = false;
     };
-  }, [agent, tick]);
+  }, [tick]);
 
   // Anything the freelancer has now been shown stops counting as new.
   useEffect(() => {
@@ -147,7 +146,6 @@ export function GigFindingsFeed({ agent }: { agent?: GigFindingAgent }) {
             <div className="min-w-0 flex-1">
               <div className="flex flex-wrap items-center gap-2 text-xs">
                 <span className={`rounded-[3px] px-2 py-0.5 font-semibold ${CHIP[f.severity] ?? CHIP.LOW}`}>{t(`find.sev.${f.severity}` as MessageKey)}</span>
-                <span className="text-ink-3">{t(f.agent === "TREASURY" ? "nav.treasury" : "dock.agent.PROJECTS")}</span>
                 {f.status === "NEW" && <span className="rounded-[3px] bg-ink px-2 py-0.5 font-semibold text-sheet">{t("find.new")}</span>}
               </div>
               <h3 className="mt-1.5 leading-snug font-semibold text-ink">{f.title}</h3>

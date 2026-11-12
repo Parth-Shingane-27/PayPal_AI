@@ -2,16 +2,12 @@ import type { AgentName } from "@/generated/prisma/client";
 import { AppError } from "../errors";
 import { hiringAgent } from "./hiring";
 import { profileAgent } from "./profile";
-import { projectsAgent } from "./projects";
 import type { AgentSpec } from "./runtime";
-import { treasuryAgent } from "./treasury";
 
-/** The four GlobalGig specialists, one folder each. Tool lists are fixed per agent so the prompt prefix is stable. */
+/** The two GlobalGig assistants, one folder each: HIRING for clients, PROFILE for freelancers. Tool lists are fixed per agent so the prompt prefix is stable. */
 export const AGENTS = {
   PROFILE: profileAgent,
   HIRING: hiringAgent,
-  TREASURY: treasuryAgent,
-  PROJECTS: projectsAgent,
 } satisfies Partial<Record<AgentName, AgentSpec>>;
 
 export type GigAgentName = keyof typeof AGENTS;
@@ -23,5 +19,7 @@ export function agentSpec(name: AgentName): AgentSpec {
   return spec;
 }
 
-/** Agents a freelancer can open or be routed to. Clients only ever reach HIRING. */
-export const FREELANCER_AGENT_NAMES = ["PROFILE", "TREASURY", "PROJECTS"] as const satisfies readonly AgentName[];
+/** The agent a person gets: one per role. */
+export function agentForRole(role: "FREELANCER" | "CLIENT"): GigAgentName {
+  return role === "CLIENT" ? "HIRING" : "PROFILE";
+}

@@ -8,14 +8,12 @@ import { coreConfig } from "./config";
 
 export const QUEUE_NAMES = {
   webhooks: "webhooks",
-  embeddings: "embeddings",
   payouts: "payouts",
   watch: "watch",
 } as const;
 
 export type WebhookJob = { eventId: string };
 /** A service page or a freelancer's skills profile to (re-)embed. */
-export type EmbeddingJob = { kind: "service_page" | "freelancer"; id: string };
 /** A freelancer_payouts row to send. */
 export type PayoutJob = { payoutId: string };
 export type WatchJob = { freelancerId: string };
@@ -53,11 +51,6 @@ function queue(name: string): Queue {
 /** Webhook event ids are unique, so a redelivered event is queued once. */
 export async function enqueueWebhook(eventId: string): Promise<void> {
   await queue(QUEUE_NAMES.webhooks).add("process", { eventId } satisfies WebhookJob, { jobId: eventId });
-}
-
-/** (Re-)embeds a service page or a freelancer's skills profile; keyed by time so a re-publish re-embeds. */
-export async function enqueueGigEmbedding(target: { kind: "service_page" | "freelancer"; id: string }): Promise<void> {
-  await queue(QUEUE_NAMES.embeddings).add("embed", target satisfies EmbeddingJob, { jobId: `${target.kind}-${target.id}-${Date.now()}` });
 }
 
 /** Job id = payout id: approving twice can never queue two payouts. */

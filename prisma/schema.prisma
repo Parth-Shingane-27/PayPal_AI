@@ -1,4 +1,4 @@
-// GlobalCart data model. Money is always integer minor units plus an ISO
+// GlobalGig data model. Money is always integer minor units plus an ISO
 // currency code. Table and column names are snake_case.
 
 generator client {
@@ -57,10 +57,8 @@ enum PayoutStatus {
 }
 
 enum AgentName {
-  TREASURY
   PROFILE
   HIRING
-  PROJECTS
 }
 
 enum ActorType {
@@ -130,7 +128,7 @@ enum WebhookStatus {
 // ---------------------------------------------------------------------------
 
 // ---------------------------------------------------------------------------
-// Client-freelancer messaging and service-page traffic
+// Client-freelancer messaging
 // ---------------------------------------------------------------------------
 
 // ---------------------------------------------------------------------------
@@ -215,7 +213,7 @@ model WebhookEvent {
   @@map("webhook_events")
 }
 
-/// A proactive observation by the Treasury or Operations agent. One open row
+/// A proactive observation by the Freelancer Agent. One open row
 /// per (freelancer_id, fingerprint); see the partial unique index in the migration.
 model Finding {
   id            String        @id @default(uuid(7)) @db.Uuid
@@ -246,7 +244,7 @@ model Finding {
 }
 
 // ===========================================================================
-// GlobalGig: freelancers sell services to clients in other countries.
+// GlobalGig: clients post projects, freelancers send proposals.
 // Clients fund each milestone through PayPal into the platform account; the
 // money is "in holding" until the client accepts the delivery (or the worker
 // auto-releases it), and only then becomes available to the freelancer.
@@ -258,33 +256,14 @@ enum Availability {
   UNAVAILABLE
 }
 
-enum PricingModel {
-  PACKAGES
-  HOURLY
-}
-
-enum PackageTier {
-  BASIC
-  STANDARD
-  PREMIUM
-}
-
-enum PageStatus {
-  DRAFT
-  PUBLISHED
-  ARCHIVED
-}
-
 enum BriefStatus {
   DRAFT
   OPEN
   CLOSED
 }
 
-/// REQUESTED: the client asked, the freelancer has not priced it yet.
-/// SENT: the freelancer sent a price. ACCEPTED: a contract was made from it.
+/// SENT: the freelancer sent a proposal. ACCEPTED: a contract was made from it.
 enum QuoteStatus {
-  REQUESTED
   SENT
   ACCEPTED
   DECLINED
@@ -293,7 +272,6 @@ enum QuoteStatus {
 }
 
 enum ContractSource {
-  PACKAGE
   QUOTE
 }
 
@@ -357,14 +335,8 @@ model Freelancer {
   invoice_seq           Int                          @default(0)
   /// Opt-in: the Treasury agent may draft payout proposals by itself (still approved by the freelancer).
   auto_payout_proposals Boolean                      @default(false)
-  /// Skills + headline embedding for client search.
-  embedding             Unsupported("vector(1024)")?
-  embedded_at           DateTime?                    @db.Timestamptz(3)
   created_at            DateTime                     @default(now()) @db.Timestamptz(3)
 
-  services         Service[]
-  service_pages    ServicePage[]
-  market_research  MarketRateResearch[]
   quotes           Quote[]
   contracts        Contract[]
   milestones       Milestone[]
@@ -407,151 +379,6 @@ model Client {
 }
 
 // ---------------------------------------------------------------------------
-// Services and localized service pages
-// ---------------------------------------------------------------------------
-
-model Service {
-  id                String       @id @default(uuid(7)) @db.Uuid
-  freelancer_id     String       @db.Uuid
-  /// Freelancer's own short code, unique per freelancer.
-  code              String
-  /// Source-language title and description, written by the freelancer.
-  title             String
-  description       String
-  source_locale     String
-  category          String
-  tags              String[]     @default([])
-  pricing_model     PricingModel
-  /// Base prices (packages and hourly rate) are in this currency, the freelancer's home currency.
-  currency          String       @db.Char(3)
-  /// HOURLY services only.
-  hourly_rate_minor Int?
-  image_url         String?
-  rating_avg        Float?
-  rating_count      Int          @default(0)
-  created_at        DateTime     @default(now()) @db.Timestamptz(3)
-  updated_at        DateTime     @updatedAt @db.Timestamptz(3)
-
-  freelancer      Freelancer           @relation(fields: [freelancer_id], references: [id])
-  packages        ServicePackage[]
-  pages           ServicePage[]
-  market_research MarketRateResearch[]
-  quotes          Quote[]
-  contracts       Contract[]
-  threads         Thread[]
-
-  @@unique([freelancer_id, code])
-  @@index([freelancer_id])
-  @@map("services")
-}
-
-/// Basic / Standard / Premium: scope, delivery time and revisions for a fixed price.
-model ServicePackage {
-  id               String      @id @default(uuid(7)) @db.Uuid
-  service_id       String      @db.Uuid
-  tier             PackageTier
-  name             String
-  scope            String
-  deliverables     String[]    @default([])
-  delivery_days    Int
-  revisions        Int
-  /// The freelancer's own estimate; the rate floor is estimated_hours x hourly floor.
-  estimated_hours  Int
-  /// In the service currency.
-  base_price_minor Int
-
-  service   Service            @relation(fields: [service_id], references: [id], onDelete: Cascade)
-  prices    ServicePagePrice[]
-  quotes    Quote[]
-  contracts Contract[]
-
-  @@unique([service_id, tier])
-  @@map("service_packages")
-}
-
-/// One service page per market: localized copy and prices in the market currency.
-model ServicePage {
-  id                String                       @id @default(uuid(7)) @db.Uuid
-  service_id        String                       @db.Uuid
-  freelancer_id     String                       @db.Uuid
-  locale            String
-  currency          String                       @db.Char(3)
-  title             String
-  description       String
-  seo_title         String
-  /// HOURLY services: the rate in this market.
-  hourly_rate_minor Int?
-  status            PageStatus                   @default(DRAFT)
-  /// The suggest_rate result the prices came from (null if set by hand).
-  pricing           Json?
-  embedding         Unsupported("vector(1024)")?
-  embedded_at       DateTime?                    @db.Timestamptz(3)
-  published_at      DateTime?                    @db.Timestamptz(3)
-  created_at        DateTime                     @default(now()) @db.Timestamptz(3)
-  updated_at        DateTime                     @updatedAt @db.Timestamptz(3)
-
-  service     Service                @relation(fields: [service_id], references: [id], onDelete: Cascade)
-  freelancer  Freelancer             @relation(fields: [freelancer_id], references: [id])
-  prices      ServicePagePrice[]
-  daily_stats ServicePageDailyStat[]
-
-  @@unique([service_id, locale])
-  @@index([locale, status])
-  @@index([freelancer_id])
-  @@map("service_pages")
-}
-
-/// A package's price on one service page, in the page currency.
-model ServicePagePrice {
-  page_id     String @db.Uuid
-  package_id  String @db.Uuid
-  price_minor Int
-
-  page    ServicePage    @relation(fields: [page_id], references: [id], onDelete: Cascade)
-  package ServicePackage @relation(fields: [package_id], references: [id], onDelete: Cascade)
-
-  @@id([page_id, package_id])
-  @@map("service_page_prices")
-}
-
-/// What comparable freelance services cost in one market (freelance platforms
-/// and agency rate pages), converted into the market currency by code.
-model MarketRateResearch {
-  id            String   @id @default(uuid(7)) @db.Uuid
-  freelancer_id String   @db.Uuid
-  /// Null while the service is still being added; linked by query_hash on creation.
-  service_id    String?  @db.Uuid
-  query_hash    String?
-  locale        String
-  currency      String   @db.Char(3)
-  result        Json
-  offer_count   Int
-  created_at    DateTime @default(now()) @db.Timestamptz(3)
-
-  freelancer Freelancer @relation(fields: [freelancer_id], references: [id])
-  service    Service?   @relation(fields: [service_id], references: [id], onDelete: Cascade)
-
-  @@index([service_id, locale, created_at])
-  @@index([freelancer_id, query_hash, locale, created_at])
-  @@map("market_rate_research")
-}
-
-/// Daily traffic per service page.
-model ServicePageDailyStat {
-  page_id        String   @db.Uuid
-  day            DateTime @db.Date
-  views          Int      @default(0)
-  quote_requests Int      @default(0)
-  /// Contracts started from this page that day.
-  contracts      Int      @default(0)
-
-  page ServicePage @relation(fields: [page_id], references: [id], onDelete: Cascade)
-
-  @@id([page_id, day])
-  @@map("service_page_daily_stats")
-}
-
-// ---------------------------------------------------------------------------
 // Briefs, quotes, contracts, milestones
 // ---------------------------------------------------------------------------
 
@@ -579,18 +406,16 @@ model Brief {
   @@map("briefs")
 }
 
-/// A client asks a freelancer for a price (REQUESTED); the freelancer answers (SENT).
+/// A freelancer's proposal on a client's project (a Brief): a price, delivery time and scope (SENT).
 model Quote {
   id              String      @id @default(uuid(7)) @db.Uuid
   client_id       String      @db.Uuid
   freelancer_id   String      @db.Uuid
   brief_id        String?     @db.Uuid
-  service_id      String?     @db.Uuid
-  package_id      String?     @db.Uuid
   /// Client's market: the quote is priced in its currency.
   locale          String
   currency        String      @db.Char(3)
-  status          QuoteStatus @default(REQUESTED)
+  status          QuoteStatus @default(SENT)
   request_message String
   /// Null until the freelancer sends a price.
   total_minor     Int?
@@ -609,8 +434,6 @@ model Quote {
   client     Client          @relation(fields: [client_id], references: [id])
   freelancer Freelancer      @relation(fields: [freelancer_id], references: [id])
   brief      Brief?          @relation(fields: [brief_id], references: [id])
-  service    Service?        @relation(fields: [service_id], references: [id])
-  package    ServicePackage? @relation(fields: [package_id], references: [id])
   contract   Contract?
   threads    Thread[]
 
@@ -625,8 +448,6 @@ model Contract {
   client_id         String         @db.Uuid
   freelancer_id     String         @db.Uuid
   source            ContractSource
-  service_id        String?        @db.Uuid
-  package_id        String?        @db.Uuid
   quote_id          String?        @unique @db.Uuid
   title             String
   scope             String
@@ -643,8 +464,6 @@ model Contract {
 
   client     Client             @relation(fields: [client_id], references: [id])
   freelancer Freelancer         @relation(fields: [freelancer_id], references: [id])
-  service    Service?           @relation(fields: [service_id], references: [id])
-  package    ServicePackage?    @relation(fields: [package_id], references: [id])
   quote      Quote?             @relation(fields: [quote_id], references: [id])
   milestones Milestone[]
   payments   MilestonePayment[]
@@ -915,7 +734,6 @@ model Thread {
   id                String             @id @default(uuid(7)) @db.Uuid
   freelancer_id     String             @db.Uuid
   client_id         String             @db.Uuid
-  service_id        String?            @db.Uuid
   brief_id          String?            @db.Uuid
   quote_id          String?            @db.Uuid
   contract_id       String?            @db.Uuid
@@ -929,7 +747,6 @@ model Thread {
 
   freelancer  Freelancer      @relation(fields: [freelancer_id], references: [id])
   client      Client          @relation(fields: [client_id], references: [id])
-  service     Service?        @relation(fields: [service_id], references: [id])
   brief       Brief?          @relation(fields: [brief_id], references: [id])
   quote       Quote?          @relation(fields: [quote_id], references: [id])
   contract    Contract?       @relation(fields: [contract_id], references: [id])

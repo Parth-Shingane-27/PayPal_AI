@@ -30,7 +30,6 @@ type MilestoneRow = {
   contract_id: string;
   contract: string;
   milestone: string;
-  service: string | null;
   client: string;
   client_country: string;
   market: string;
@@ -51,7 +50,7 @@ type MilestoneRow = {
   invoice: { invoice_id: string; number: string } | null;
 };
 
-/** One client, service or market in one currency (aggregate in dashboards.ts). */
+/** One client, project or market in one currency (aggregate in dashboards.ts). */
 type AggRow = {
   key: string;
   currency: string;
@@ -67,8 +66,6 @@ type TotalRow = { currency: string; milestones: number; amount: MoneyT; in_holdi
 
 type LedgerData = { period: { label: string }; totals?: TotalRow[]; milestones: MilestoneRow[]; clients: AggRow[]; services: AggRow[]; markets: AggRow[] };
 
-/** The server's label for milestones that came from a custom quote rather than a listed service. */
-const CUSTOM_QUOTE = "Custom quote";
 
 type Pinned = { node: { rowPinned?: string | null } };
 
@@ -132,7 +129,7 @@ export function GigLedgerGrid({
         lockVisible: true,
         width: typeof window !== "undefined" && window.innerWidth < 640 ? 180 : 260,
         minWidth: 160,
-        getQuickFilterText: (p) => `${p.data?.contract ?? ""} ${p.data?.service ?? ""}`,
+        getQuickFilterText: (p) => `${p.data?.contract ?? ""} ${p.data?.client ?? ""}`,
         cellRenderer: (p: CustomCellRendererProps<MilestoneRow, string>) =>
           p.node.rowPinned ? (
             pinnedLabel(p)
@@ -141,7 +138,7 @@ export function GigLedgerGrid({
               <Link href={`${base}/projects/${p.data.contract_id}`} className="block truncate font-medium text-ink hover:text-accent hover:underline">
                 {p.data.contract}
               </Link>
-              <span className="block truncate text-xs text-ink-3">{p.data.service ?? t("shared.led.customQuote")}</span>
+              <span className="block truncate text-xs text-ink-3">{p.data.client}</span>
             </span>
           ) : null,
       },
@@ -206,9 +203,7 @@ export function GigLedgerGrid({
             lockVisible: true,
             width: 240,
             cellClass: "font-medium",
-            valueFormatter: (p) => (kind === "services" && p.value === CUSTOM_QUOTE ? t("shared.led.customQuote") : String(p.value ?? "")),
-            cellRenderer: (p: CustomCellRendererProps<AggRow, string>) =>
-              p.node.rowPinned ? pinnedLabel(p) : <span className="truncate">{kind === "services" && p.value === CUSTOM_QUOTE ? t("shared.led.customQuote") : p.value}</span>,
+            cellRenderer: (p: CustomCellRendererProps<AggRow, string>) => (p.node.rowPinned ? pinnedLabel(p) : <span className="truncate">{p.value}</span>),
           },
       { field: "currency", headerName: t("col.currency"), width: 110 },
       countCol<AggRow>("milestones", t("shared.led.col.milestones"), { sort: "desc", width: 120 }),

@@ -2,7 +2,7 @@ import Groq from "groq-sdk";
 import { beforeEach, describe, expect, it } from "vitest";
 import { prisma } from "@/server/db";
 import { runDetectors } from "@/server/proactive/detectors";
-import { dismissFinding, listFindings, newFindingCounts, reconcileFindings, snoozeFinding } from "@/server/proactive/findings";
+import { dismissFinding, countNewFindings, listFindings, reconcileFindings, snoozeFinding } from "@/server/proactive/findings";
 import { parseFinding, stripIds } from "@/server/proactive/investigate";
 import { proactiveSpec } from "@/server/proactive/specs";
 import { MAX_PROACTIVE_RUNS_PER_DAY } from "@/server/proactive/thresholds";
@@ -34,7 +34,7 @@ async function rich(auto: boolean) {
 }
 
 describe("detectors", () => {
-  it("each Projects rule fires on its own facts", async () => {
+  it("each project rule fires on its own facts", async () => {
     const f = await makeFreelancer();
     const c = await makeClient({ name: "Kenji Watanabe", company_name: "Sakura Robotics K.K." });
     const now = new Date();
@@ -45,57 +45,37 @@ describe("detectors", () => {
         { amount_minor: 10_000, state: "IN_PROGRESS" },
         { amount_minor: 10_000, state: "IN_PROGRESS" },
         { amount_minor: 10_000, state: "DELIVERED" },
-        { amount_minor: 10_000, state: "REVISION_REQUESTED" },
         { amount_minor: 10_000, state: "DISPUTED" },
       ],
       { revisions_allowed: 4 },
     );
-    const [dueSoon, overdue, delivered, loop, dispute] = milestones.map((m) => m.milestone);
+    const [dueSoon, overdue, delivered, dispute] = milestones.map((m) => m.milestone);
     await prisma.milestone.update({ where: { id: dueSoon!.id }, data: { due_date: new Date(now.getTime() + 20 * HOUR) } });
     await prisma.milestone.update({ where: { id: overdue!.id }, data: { due_date: new Date(now.getTime() - 3 * DAY) } });
     await prisma.milestone.update({ where: { id: delivered!.id }, data: { auto_release_at: new Date(now.getTime() + 30 * HOUR) } });
-    await prisma.milestone.update({ where: { id: loop!.id }, data: { revision_count: 3 } });
-    await prisma.quote.create({ data: { client_id: c.id, freelancer_id: f.id, locale: "ja-JP", currency: "JPY", status: "REQUESTED", request_message: "Price?", requested_at: new Date(now.getTime() - 30 * HOUR) } });
-    await prisma.quote.create({ data: { client_id: c.id, freelancer_id: f.id, locale: "ja-JP", currency: "JPY", status: "REQUESTED", request_message: "Fresh", requested_at: new Date(now.getTime() - 2 * HOUR) } });
-    await prisma.agentAction.create({ data: { kind: "TOOL", tool: "propose_refund", input: {}, status: "PENDING_APPROVAL", actor: "FREELANCER", freelancer_id: f.id, created_at: new Date(now.getTime() - 4 * DAY) } });
+    await prisma.agentAction.create({ data: { kind: "TOOL", tool: "propose_payout_schedule", input: {}, status: "PENDING_APPROVAL", actor: "FREELANCER", freelancer_id: f.id, created_at: new Date(now.getTime() - 4 * DAY) } });
 
     const found = await runDetectors(f.id, now);
     const by = (type: string) => found.filter((d) => d.type === type);
     expect(by("milestone_due_soon").map((d) => [d.subject, d.severity]).sort()).toEqual([[dueSoon!.id, "MEDIUM"], [overdue!.id, "HIGH"]].sort());
-    expect(by("awaiting_acceptance")).toMatchObject([{ agent: "PROJECTS", subject: delivered!.id, severity: "LOW", evidence: { hours_left: 30, client: "Sakura Robotics K.K." } }]);
-    expect(by("revision_loop")).toMatchObject([{ subject: loop!.id, evidence: { revisions: 3 } }]);
+    expect(by("awaiting_acceptance")).toMatchObject([{ agent: "PROFILE", subject: delivered!.id, severity: "LOW", evidence: { hours_left: 30, client: "Sakura Robotics K.K." } }]);
     expect(by("open_dispute")).toMatchObject([{ subject: dispute!.id, severity: "HIGH" }]);
-    expect(by("quote_requests_unanswered")).toMatchObject([{ subject: "all", evidence: { count: 1 } }]);
     expect(by("approval_aging")).toMatchObject([{ evidence: { count: 1 } }]);
+    // Every finding belongs to the one freelancer assistant.
+    expect(new Set(found.map((d) => d.agent))).toEqual(new Set(["PROFILE"]));
 
     const clean = await makeFreelancer();
     expect(await runDetectors(clean.id, now)).toEqual([]);
-  });
-
-  it("flags a refund-rate spike", async () => {
-    const f = await makeFreelancer();
-    const c = await makeClient();
-    const { milestones } = await makeContract(f.id, c.id, [
-      { amount_minor: 5_000, state: "REFUNDED" },
-      { amount_minor: 5_000, state: "REFUNDED" },
-      { amount_minor: 5_000, state: "ACCEPTED" },
-    ]);
-    for (const m of milestones.slice(0, 2)) {
-      await prisma.milestoneRefund.create({
-        data: { payment_id: m.payment!.id, milestone_id: m.milestone.id, contract_id: m.milestone.contract_id, freelancer_id: f.id, currency: "USD", amount_minor: 5_000, reason: "Cancelled", from_holding: true, status: "COMPLETED", freelancer_debit_minor: 0 },
-      });
-    }
-    expect((await runDetectors(f.id, new Date(Date.now() + 60_000))).find((d) => d.type === "refund_rate_spike")).toMatchObject({ agent: "PROJECTS", evidence: { refunds_last_30_days: 2, milestones_funded_last_30_days: 3 } });
   });
 
   it("flags released money big enough to reach the payout fee cap", async () => {
     const f = await rich(false);
     const found = await runDetectors(f.id);
     expect(found.map((d) => d.type)).toEqual(["payout_ready"]);
-    expect(found[0]).toMatchObject({ agent: "TREASURY", subject: "USD" });
+    expect(found[0]).toMatchObject({ agent: "PROFILE", subject: "USD" });
   });
 
-  it("never treats money in holding as ready to pay out, and flags a large inflow into holding", async () => {
+  it("never treats money in holding as ready to pay out", async () => {
     const f = await makeFreelancer();
     const c = await makeClient();
     const { milestones } = await makeContract(f.id, c.id, [
@@ -107,7 +87,6 @@ describe("detectors", () => {
     for (const m of milestones.slice(0, 3)) await prisma.milestone.update({ where: { id: m.milestone.id }, data: { funded_at: new Date(Date.now() - 30 * DAY) } });
     const found = await runDetectors(f.id);
     expect(found.find((d) => d.type === "payout_ready")).toBeUndefined();
-    expect(found.find((d) => d.type === "large_holding_inflow")).toMatchObject({ agent: "TREASURY", subject: "USD", evidence: { funded_this_week: { amount_minor: 500_000 }, milestones: 1 } });
     expect((await freelancerLedger(f.id))[0]!.inHolding).toBe(500_000);
   });
 });
@@ -118,10 +97,10 @@ describe("findings lifecycle", () => {
     const det = await runDetectors(f.id);
     const first = await reconcileFindings(f.id, det);
     expect(first.created).toHaveLength(1);
-    expect(first.created[0]).toMatchObject({ freelancer_id: f.id, agent: "PROJECTS", fingerprint: `open_dispute:${milestone.id}` });
+    expect(first.created[0]).toMatchObject({ freelancer_id: f.id, agent: "PROFILE", fingerprint: `open_dispute:${milestone.id}` });
     expect((await reconcileFindings(f.id, det)).created).toHaveLength(0);
     expect(await prisma.finding.count({ where: { freelancer_id: f.id } })).toBe(1);
-    expect(await newFindingCounts(f.id)).toEqual({ TREASURY: 0, PROJECTS: 1 });
+    expect(await countNewFindings(f.id)).toBe(1);
 
     const found = first.created[0]!;
     expect(await dismissFinding(found.id, f.id)).not.toBeNull();
@@ -183,11 +162,10 @@ describe("watcher", () => {
     const finding = await prisma.finding.findFirstOrThrow({ where: { freelancer_id: f.id, type: "open_dispute" } });
     expect(finding.title).toBe("Nordlicht disputed your brand identity milestone");
     const session = await prisma.agentSession.findUniqueOrThrow({ where: { id: finding.session_id! } });
-    expect(session).toMatchObject({ actor: "SYSTEM", agent: "PROJECTS", freelancer_id: f.id });
-    // The automatic check cannot propose refunds.
+    expect(session).toMatchObject({ actor: "SYSTEM", agent: "PROFILE", freelancer_id: f.id });
+    // The automatic check cannot propose payouts unless the freelancer opted in.
     const tools = (scripted.requests[0]!.tools ?? []).map((t) => (t as { function: { name: string } }).function.name);
-    expect(tools).not.toContain("propose_refund");
-    expect(tools).not.toContain("handoff");
+    expect(tools).not.toContain("propose_payout_schedule");
 
     const before = scripted.requests.length;
     expect((await runWatch(f.id, model(scripted.model))).created).toBe(0);
@@ -215,7 +193,7 @@ describe("watcher", () => {
   it("stops spending agent runs after the daily cap", async () => {
     const { f } = await disputed();
     for (let i = 0; i < MAX_PROACTIVE_RUNS_PER_DAY; i++) {
-      await prisma.agentSession.create({ data: { agent: "PROJECTS", actor: "SYSTEM", freelancer_id: f.id, locale: f.locale } });
+      await prisma.agentSession.create({ data: { agent: "PROFILE", actor: "SYSTEM", freelancer_id: f.id, locale: f.locale } });
     }
     const scripted = scriptedModel([]);
     const result = await runWatch(f.id, model(scripted.model));
@@ -235,12 +213,11 @@ describe("watcher", () => {
 });
 
 describe("what the proactive agents may do", () => {
-  it("never gives Projects propose_refund, and gives Treasury a payout proposal only on opt-in", () => {
-    const names = (a: "TREASURY" | "PROJECTS", auto: boolean) => proactiveSpec(a, { autoPayoutProposals: auto }).tools.map((t) => t.name);
-    expect(names("PROJECTS", true)).not.toContain("propose_refund");
-    expect(names("PROJECTS", true)).not.toContain("handoff");
-    expect(names("TREASURY", false)).not.toContain("propose_payout_schedule");
-    expect(names("TREASURY", true)).toContain("propose_payout_schedule");
+  it("gives the automatic check a payout proposal only on opt-in, and never a way to send a proposal", () => {
+    const names = (auto: boolean) => proactiveSpec({ autoPayoutProposals: auto }).tools.map((t) => t.name);
+    expect(names(false)).not.toContain("propose_payout_schedule");
+    expect(names(true)).toContain("propose_payout_schedule");
+    for (const n of [...names(true), ...names(false)]) expect(n).not.toMatch(/send|publish|accept|fund|release|refund/);
   });
 
   it("drafts a payout proposal when opted in, and moves no money", async () => {

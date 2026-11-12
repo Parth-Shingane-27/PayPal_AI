@@ -386,7 +386,7 @@ export function ProjectView({ contractId }: { contractId: string }) {
   useEffect(() => {
     void load();
   }, [load]);
-  usePageAssistant({ agent: "PROJECTS", contextLabel: c?.title, onResult: () => void load() });
+  usePageAssistant({ agent: "PROFILE", contextLabel: c?.title, onResult: () => void load() });
 
   const threadRef = useRef<string | null>(null);
   useEffect(() => {

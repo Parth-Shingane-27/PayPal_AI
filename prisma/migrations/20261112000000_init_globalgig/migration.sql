@@ -1,6 +1,5 @@
-CREATE EXTENSION IF NOT EXISTS vector;
-
 -- CreateSchema
+CREATE SCHEMA IF NOT EXISTS "public";
 
 -- CreateEnum
 CREATE TYPE "PaymentStatus" AS ENUM ('CREATED', 'PENDING', 'COMPLETED', 'DECLINED', 'FAILED', 'VOIDED');
@@ -18,7 +17,7 @@ CREATE TYPE "PayoutScheduleStatus" AS ENUM ('PROPOSED', 'APPROVED', 'REJECTED');
 CREATE TYPE "PayoutStatus" AS ENUM ('PROPOSED', 'SCHEDULED', 'PROCESSING', 'SUCCESS', 'FAILED', 'CANCELLED');
 
 -- CreateEnum
-CREATE TYPE "AgentName" AS ENUM ('TREASURY', 'PROFILE', 'HIRING', 'PROJECTS');
+CREATE TYPE "AgentName" AS ENUM ('PROFILE', 'HIRING');
 
 -- CreateEnum
 CREATE TYPE "ActorType" AS ENUM ('SYSTEM', 'FREELANCER', 'CLIENT');
@@ -45,22 +44,13 @@ CREATE TYPE "WebhookStatus" AS ENUM ('RECEIVED', 'PROCESSED', 'IGNORED', 'FAILED
 CREATE TYPE "Availability" AS ENUM ('AVAILABLE', 'LIMITED', 'UNAVAILABLE');
 
 -- CreateEnum
-CREATE TYPE "PricingModel" AS ENUM ('PACKAGES', 'HOURLY');
-
--- CreateEnum
-CREATE TYPE "PackageTier" AS ENUM ('BASIC', 'STANDARD', 'PREMIUM');
-
--- CreateEnum
-CREATE TYPE "PageStatus" AS ENUM ('DRAFT', 'PUBLISHED', 'ARCHIVED');
-
--- CreateEnum
 CREATE TYPE "BriefStatus" AS ENUM ('DRAFT', 'OPEN', 'CLOSED');
 
 -- CreateEnum
-CREATE TYPE "QuoteStatus" AS ENUM ('REQUESTED', 'SENT', 'ACCEPTED', 'DECLINED', 'EXPIRED', 'WITHDRAWN');
+CREATE TYPE "QuoteStatus" AS ENUM ('SENT', 'ACCEPTED', 'DECLINED', 'EXPIRED', 'WITHDRAWN');
 
 -- CreateEnum
-CREATE TYPE "ContractSource" AS ENUM ('PACKAGE', 'QUOTE');
+CREATE TYPE "ContractSource" AS ENUM ('QUOTE');
 
 -- CreateEnum
 CREATE TYPE "ContractStatus" AS ENUM ('DRAFT', 'ACTIVE', 'COMPLETED', 'CANCELLED');
@@ -171,8 +161,6 @@ CREATE TABLE "freelancers" (
     "invoice_prefix" TEXT NOT NULL,
     "invoice_seq" INTEGER NOT NULL DEFAULT 0,
     "auto_payout_proposals" BOOLEAN NOT NULL DEFAULT false,
-    "embedding" vector(1024),
-    "embedded_at" TIMESTAMPTZ(3),
     "created_at" TIMESTAMPTZ(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
     CONSTRAINT "freelancers_pkey" PRIMARY KEY ("id")
@@ -190,101 +178,6 @@ CREATE TABLE "clients" (
     "created_at" TIMESTAMPTZ(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
     CONSTRAINT "clients_pkey" PRIMARY KEY ("id")
-);
-
--- CreateTable
-CREATE TABLE "services" (
-    "id" UUID NOT NULL,
-    "freelancer_id" UUID NOT NULL,
-    "code" TEXT NOT NULL,
-    "title" TEXT NOT NULL,
-    "description" TEXT NOT NULL,
-    "source_locale" TEXT NOT NULL,
-    "category" TEXT NOT NULL,
-    "tags" TEXT[] DEFAULT ARRAY[]::TEXT[],
-    "pricing_model" "PricingModel" NOT NULL,
-    "currency" CHAR(3) NOT NULL,
-    "hourly_rate_minor" INTEGER,
-    "image_url" TEXT,
-    "rating_avg" DOUBLE PRECISION,
-    "rating_count" INTEGER NOT NULL DEFAULT 0,
-    "created_at" TIMESTAMPTZ(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updated_at" TIMESTAMPTZ(3) NOT NULL,
-
-    CONSTRAINT "services_pkey" PRIMARY KEY ("id")
-);
-
--- CreateTable
-CREATE TABLE "service_packages" (
-    "id" UUID NOT NULL,
-    "service_id" UUID NOT NULL,
-    "tier" "PackageTier" NOT NULL,
-    "name" TEXT NOT NULL,
-    "scope" TEXT NOT NULL,
-    "deliverables" TEXT[] DEFAULT ARRAY[]::TEXT[],
-    "delivery_days" INTEGER NOT NULL,
-    "revisions" INTEGER NOT NULL,
-    "estimated_hours" INTEGER NOT NULL,
-    "base_price_minor" INTEGER NOT NULL,
-
-    CONSTRAINT "service_packages_pkey" PRIMARY KEY ("id")
-);
-
--- CreateTable
-CREATE TABLE "service_pages" (
-    "id" UUID NOT NULL,
-    "service_id" UUID NOT NULL,
-    "freelancer_id" UUID NOT NULL,
-    "locale" TEXT NOT NULL,
-    "currency" CHAR(3) NOT NULL,
-    "title" TEXT NOT NULL,
-    "description" TEXT NOT NULL,
-    "seo_title" TEXT NOT NULL,
-    "hourly_rate_minor" INTEGER,
-    "status" "PageStatus" NOT NULL DEFAULT 'DRAFT',
-    "pricing" JSONB,
-    "embedding" vector(1024),
-    "embedded_at" TIMESTAMPTZ(3),
-    "published_at" TIMESTAMPTZ(3),
-    "created_at" TIMESTAMPTZ(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updated_at" TIMESTAMPTZ(3) NOT NULL,
-
-    CONSTRAINT "service_pages_pkey" PRIMARY KEY ("id")
-);
-
--- CreateTable
-CREATE TABLE "service_page_prices" (
-    "page_id" UUID NOT NULL,
-    "package_id" UUID NOT NULL,
-    "price_minor" INTEGER NOT NULL,
-
-    CONSTRAINT "service_page_prices_pkey" PRIMARY KEY ("page_id","package_id")
-);
-
--- CreateTable
-CREATE TABLE "market_rate_research" (
-    "id" UUID NOT NULL,
-    "freelancer_id" UUID NOT NULL,
-    "service_id" UUID,
-    "query_hash" TEXT,
-    "locale" TEXT NOT NULL,
-    "currency" CHAR(3) NOT NULL,
-    "result" JSONB NOT NULL,
-    "offer_count" INTEGER NOT NULL,
-    "created_at" TIMESTAMPTZ(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-
-    CONSTRAINT "market_rate_research_pkey" PRIMARY KEY ("id")
-);
-
--- CreateTable
-CREATE TABLE "service_page_daily_stats" (
-    "page_id" UUID NOT NULL,
-    "day" DATE NOT NULL,
-    "views" INTEGER NOT NULL DEFAULT 0,
-    "quote_requests" INTEGER NOT NULL DEFAULT 0,
-    "contracts" INTEGER NOT NULL DEFAULT 0,
-
-    CONSTRAINT "service_page_daily_stats_pkey" PRIMARY KEY ("page_id","day")
 );
 
 -- CreateTable
@@ -311,11 +204,9 @@ CREATE TABLE "quotes" (
     "client_id" UUID NOT NULL,
     "freelancer_id" UUID NOT NULL,
     "brief_id" UUID,
-    "service_id" UUID,
-    "package_id" UUID,
     "locale" TEXT NOT NULL,
     "currency" CHAR(3) NOT NULL,
-    "status" "QuoteStatus" NOT NULL DEFAULT 'REQUESTED',
+    "status" "QuoteStatus" NOT NULL DEFAULT 'SENT',
     "request_message" TEXT NOT NULL,
     "total_minor" INTEGER,
     "delivery_days" INTEGER,
@@ -338,8 +229,6 @@ CREATE TABLE "contracts" (
     "client_id" UUID NOT NULL,
     "freelancer_id" UUID NOT NULL,
     "source" "ContractSource" NOT NULL,
-    "service_id" UUID,
-    "package_id" UUID,
     "quote_id" UUID,
     "title" TEXT NOT NULL,
     "scope" TEXT NOT NULL,
@@ -511,7 +400,6 @@ CREATE TABLE "threads" (
     "id" UUID NOT NULL,
     "freelancer_id" UUID NOT NULL,
     "client_id" UUID NOT NULL,
-    "service_id" UUID,
     "brief_id" UUID,
     "quote_id" UUID,
     "contract_id" UUID,
@@ -584,30 +472,6 @@ CREATE UNIQUE INDEX "freelancers_invoice_prefix_key" ON "freelancers"("invoice_p
 
 -- CreateIndex
 CREATE UNIQUE INDEX "clients_email_key" ON "clients"("email");
-
--- CreateIndex
-CREATE INDEX "services_freelancer_id_idx" ON "services"("freelancer_id");
-
--- CreateIndex
-CREATE UNIQUE INDEX "services_freelancer_id_code_key" ON "services"("freelancer_id", "code");
-
--- CreateIndex
-CREATE UNIQUE INDEX "service_packages_service_id_tier_key" ON "service_packages"("service_id", "tier");
-
--- CreateIndex
-CREATE INDEX "service_pages_locale_status_idx" ON "service_pages"("locale", "status");
-
--- CreateIndex
-CREATE INDEX "service_pages_freelancer_id_idx" ON "service_pages"("freelancer_id");
-
--- CreateIndex
-CREATE UNIQUE INDEX "service_pages_service_id_locale_key" ON "service_pages"("service_id", "locale");
-
--- CreateIndex
-CREATE INDEX "market_rate_research_service_id_locale_created_at_idx" ON "market_rate_research"("service_id", "locale", "created_at");
-
--- CreateIndex
-CREATE INDEX "market_rate_research_freelancer_id_query_hash_locale_create_idx" ON "market_rate_research"("freelancer_id", "query_hash", "locale", "created_at");
 
 -- CreateIndex
 CREATE INDEX "briefs_client_id_status_idx" ON "briefs"("client_id", "status");
@@ -730,33 +594,6 @@ ALTER TABLE "agent_actions" ADD CONSTRAINT "agent_actions_freelancer_payout_sche
 ALTER TABLE "findings" ADD CONSTRAINT "findings_freelancer_id_fkey" FOREIGN KEY ("freelancer_id") REFERENCES "freelancers"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "services" ADD CONSTRAINT "services_freelancer_id_fkey" FOREIGN KEY ("freelancer_id") REFERENCES "freelancers"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "service_packages" ADD CONSTRAINT "service_packages_service_id_fkey" FOREIGN KEY ("service_id") REFERENCES "services"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "service_pages" ADD CONSTRAINT "service_pages_service_id_fkey" FOREIGN KEY ("service_id") REFERENCES "services"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "service_pages" ADD CONSTRAINT "service_pages_freelancer_id_fkey" FOREIGN KEY ("freelancer_id") REFERENCES "freelancers"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "service_page_prices" ADD CONSTRAINT "service_page_prices_page_id_fkey" FOREIGN KEY ("page_id") REFERENCES "service_pages"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "service_page_prices" ADD CONSTRAINT "service_page_prices_package_id_fkey" FOREIGN KEY ("package_id") REFERENCES "service_packages"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "market_rate_research" ADD CONSTRAINT "market_rate_research_freelancer_id_fkey" FOREIGN KEY ("freelancer_id") REFERENCES "freelancers"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "market_rate_research" ADD CONSTRAINT "market_rate_research_service_id_fkey" FOREIGN KEY ("service_id") REFERENCES "services"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "service_page_daily_stats" ADD CONSTRAINT "service_page_daily_stats_page_id_fkey" FOREIGN KEY ("page_id") REFERENCES "service_pages"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-
--- AddForeignKey
 ALTER TABLE "briefs" ADD CONSTRAINT "briefs_client_id_fkey" FOREIGN KEY ("client_id") REFERENCES "clients"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
@@ -769,22 +606,10 @@ ALTER TABLE "quotes" ADD CONSTRAINT "quotes_freelancer_id_fkey" FOREIGN KEY ("fr
 ALTER TABLE "quotes" ADD CONSTRAINT "quotes_brief_id_fkey" FOREIGN KEY ("brief_id") REFERENCES "briefs"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "quotes" ADD CONSTRAINT "quotes_service_id_fkey" FOREIGN KEY ("service_id") REFERENCES "services"("id") ON DELETE SET NULL ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "quotes" ADD CONSTRAINT "quotes_package_id_fkey" FOREIGN KEY ("package_id") REFERENCES "service_packages"("id") ON DELETE SET NULL ON UPDATE CASCADE;
-
--- AddForeignKey
 ALTER TABLE "contracts" ADD CONSTRAINT "contracts_client_id_fkey" FOREIGN KEY ("client_id") REFERENCES "clients"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "contracts" ADD CONSTRAINT "contracts_freelancer_id_fkey" FOREIGN KEY ("freelancer_id") REFERENCES "freelancers"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "contracts" ADD CONSTRAINT "contracts_service_id_fkey" FOREIGN KEY ("service_id") REFERENCES "services"("id") ON DELETE SET NULL ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "contracts" ADD CONSTRAINT "contracts_package_id_fkey" FOREIGN KEY ("package_id") REFERENCES "service_packages"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "contracts" ADD CONSTRAINT "contracts_quote_id_fkey" FOREIGN KEY ("quote_id") REFERENCES "quotes"("id") ON DELETE SET NULL ON UPDATE CASCADE;
@@ -851,9 +676,6 @@ ALTER TABLE "threads" ADD CONSTRAINT "threads_freelancer_id_fkey" FOREIGN KEY ("
 
 -- AddForeignKey
 ALTER TABLE "threads" ADD CONSTRAINT "threads_client_id_fkey" FOREIGN KEY ("client_id") REFERENCES "clients"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "threads" ADD CONSTRAINT "threads_service_id_fkey" FOREIGN KEY ("service_id") REFERENCES "services"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "threads" ADD CONSTRAINT "threads_brief_id_fkey" FOREIGN KEY ("brief_id") REFERENCES "briefs"("id") ON DELETE SET NULL ON UPDATE CASCADE;

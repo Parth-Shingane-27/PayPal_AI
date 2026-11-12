@@ -5,12 +5,11 @@
 | Layer | Choice |
 |---|---|
 | Frontend | Next.js 16 (App Router, `proxy.ts`), React 19, TypeScript, Tailwind 4; UI strings in 7 languages (en, hi, ja, de, fr, es, it) from in-repo dictionaries |
-| Backend | Next.js API routes for the app, plus a separate Node/Fastify worker for webhooks, payout jobs, auto-release, embeddings and daily agent checks |
-| DB and queue | Postgres 17 with Prisma 7 and pgvector, Redis with BullMQ |
-| AI | Groq (`groq-sdk`): `openai/gpt-oss-120b` for the agents, `openai/gpt-oss-20b` for routing and page copy; a hand-written agent loop with strict zod-derived tool schemas |
-| Search | pgvector semantic search over service pages (Voyage `voyage-4` embeddings), keyword fallback without a key |
+| Backend | Next.js API routes for the app, plus a separate Node/Fastify worker for webhooks, payout jobs, auto-release and daily agent checks |
+| DB and queue | Postgres 17 with Prisma 7, Redis with BullMQ |
+| AI | Groq (`groq-sdk`): `openai/gpt-oss-120b` for the agents, `openai/gpt-oss-20b` for lightweight calls; a hand-written agent loop with strict zod-derived tool schemas |
 | PayPal | Orders v2, Payments v2, Payouts v1, Webhooks v1 (platform account collects; payouts to freelancers) |
-| Data | Frankfurter FX rates, Groq `browser_search` for market-rate research |
+| Data | Frankfurter FX rates |
 | UI components | AG Grid Community for the earnings ledger |
 | Observability | `agent_actions` (tool calls, PayPal calls, model runs) and `milestone_events` (every state change), shown as timelines |
 
@@ -19,15 +18,13 @@
 ```
  Client / Freelancer (Next.js UI)
           |
-   Next.js API routes ----> Postgres (+ pgvector) <---- Worker (Fastify + BullMQ)
+   Next.js API routes ----> Postgres <---- Worker (Fastify + BullMQ)
      |         |                                            |  webhooks, payouts, auto-release,
-     |   services (src/server/services/gig)                 |  embeddings, daily checks
+     |   services (src/server/services/gig)                 |  daily checks
      |         |                                            |
    /api/chat (SSE) -> orchestrator -> runtime loop -> tools -> services
-   |- Profile    (freelancer)
-   |- Hiring     (client only)
-   |- Treasury   (freelancer)
-   |- Projects   (freelancer)
+   |- Freelancer Agent  (profile/, freelancers)
+   |- Client Agent      (hiring/, clients)
           |
           +-------- PayPal APIs (Orders, Payments, Payouts) <----+
                     PayPal Webhooks (POST /webhooks/paypal) ------>+
@@ -41,13 +38,12 @@ Layers: `src/server/domain` is pure maths (money, fees, rates, milestone state m
 | GlobalCart | GlobalGig |
 |---|---|
 | Seller / Buyer | Freelancer / Client |
-| Product | Service (packages Basic / Standard / Premium, or hourly) |
-| Listing | Localized service page, one per market |
-| Order | Contract with Milestones |
+| Product + Listing | Project post (`briefs`), posted by a client |
+| Cart / Order | Proposal (`quotes`) chosen by the client, then a Contract with Milestones |
 | Payment | Milestone payment (PayPal capture of one milestone) |
 | Refund / Payout / Payout schedule | Milestone refund / Freelancer payout / Freelancer payout schedule |
 | Conversation / Message | Thread / Thread message (+ attachments) |
-| Operations agent | Projects agent |
+| Treasury and Operations agents | merged into the Freelancer Agent (`profile/`) |
 
 ## 4. Milestone state machine
 
@@ -76,48 +72,43 @@ Funding, refund completion and auto-release are `SYSTEM` events: they come from 
 
 ## 6. Agents
 
-Agents only read and propose. No tool funds, releases, refunds or pays out. Tool inputs never carry a freelancer id, client id or locale; the runtime injects them from the session.
+Agents only read, draft and propose. No tool funds, releases, refunds or pays out. Tool inputs never carry a freelancer id, client id or locale; the runtime injects them from the session. Each role has exactly one agent, so there is no router and no handoff.
 
 | Agent | Who | Tools |
 |---|---|---|
-| Profile | freelancer | `get_service`, `preview_service`, `create_service`, `list_markets`, `market_overview`, `research_market_rates`, `get_fx_rate`, `suggest_rate`, `save_service_draft`, `reprice_service`, `handoff` |
-| Hiring | client only | `search_freelancers`, `compare_freelancers`, `draft_brief`, `request_quote`, `view_quote`, `propose_milestone_plan`, `create_milestone_payment` |
-| Treasury | freelancer | `get_balances`, `estimate_fees`, `forecast_earnings`, `compare_direct_invoicing`, `propose_payout_schedule`, `get_invoice`, `handoff` |
-| Projects | freelancer | `query_contracts`, `get_contract_details`, `get_milestone_status`, `earnings_by_client`, `earnings_by_market`, `detect_anomalies`, `propose_refund`, `draft_delivery_note`, `handoff` |
+| Freelancer Agent (`profile/`) | freelancer | `find_open_projects`, `get_project`, `suggest_rate`, `draft_proposal`, `get_balances`, `estimate_fees`, `propose_payout_schedule` |
+| Client Agent (`hiring/`) | client | `draft_project`, `list_proposals`, `compare_proposals`, `propose_milestone_plan`, `create_milestone_payment` |
 
-Tool kinds: `read`, `draft` (writes a draft the person must still act on, e.g. a brief or a service page in DRAFT) and `proposal` (writes a `PENDING_APPROVAL` row in `agent_actions`). `create_milestone_payment` creates the PayPal order and returns a checkout link; the client clicking in PayPal is the payment. The freelancer's quote or package sets the contract total; `propose_milestone_plan` only splits it, and the sum is checked in code.
-
-The freelancer Assistant router is a strict `json_schema` classifier, validated again with zod, with one handoff per message. Clients go straight to Hiring. Old GlobalCart roles are refused.
+Tool kinds: `read`, `draft` (returns or saves a draft the person must still act on: a project post is saved as DRAFT, a proposal draft is only returned) and `proposal` (writes a `PENDING_APPROVAL` row in `agent_actions`; only `propose_payout_schedule`). `create_milestone_payment` creates the PayPal order and returns the approval link without capturing.
 
 ## 7. End-to-end flow
 
-1. **Publish.** The freelancer creates a service; Profile drafts localized pages and rates per market; the freelancer publishes each page (embedding job queued).
-2. **Find and quote.** A client searches (semantic), compares, asks, or posts a brief, and requests a quote. The freelancer answers with a price, delivery time and revisions.
-3. **Hire.** The client plans milestones (or hires a package). The contract is created with milestones in `AWAITING_FUNDING`.
+1. **Post.** A client writes a project (the Client Agent can draft it) and posts it; it appears on the project board.
+2. **Propose.** Freelancers browse the board (best skill match first) and send proposals: a price in the client's currency (the Freelancer Agent suggests one that nets at least their hourly floor after fees), delivery time, revisions and scope.
+3. **Choose.** The client compares proposals, picks one and plans milestones. The contract is created with milestones in `AWAITING_FUNDING`. When the first milestone is funded, the proposal is accepted, the other proposals are declined and the project closes.
 4. **Fund.** The client pays milestone 1 in PayPal; the capture route (and the `PAYMENT.CAPTURE.*` webhook) records PayPal's fee and fires `FUND`. The money is in holding.
 5. **Work.** The freelancer starts and delivers (note and files). `auto_release_at = delivered_at + AUTO_RELEASE_DAYS`.
 6. **Accept.** The client accepts, asks for a revision, or disputes. If nothing happens, the worker's auto-release sweep accepts it.
 7. **Release.** Acceptance records the net, moves it from holding to available, issues the invoice and, when all milestones are done, completes the contract.
-8. **Payout.** The freelancer approves a payout (schedule proposed by Treasury, or **Pay out now**). A delayed worker job sends the Payouts batch (`sender_batch_id` is the idempotency key) and polls until PayPal finishes.
-9. **Refund.** Projects proposes a refund; the freelancer approves it; PayPal processes it. A refund from holding debits nothing from the freelancer; one after release is debited from the balance. A partial refund of a disputed milestone releases the remainder.
+8. **Payout.** The freelancer approves a payout (schedule proposed by the Freelancer Agent, or **Pay out now**). A delayed worker job sends the Payouts batch (`sender_batch_id` is the idempotency key) and polls until PayPal finishes.
+9. **Refund.** A refund is proposed from the project page; the freelancer approves it; PayPal processes it. A refund from holding debits nothing from the freelancer; one after release is debited from the balance. A partial refund of a disputed milestone releases the remainder.
 
 ## 8. Worker and webhooks
 
 - `POST /webhooks/paypal`: verify the signature, store the event once (unique event id), queue, process. Handled: `PAYMENT.CAPTURE.*` (milestone capture, refund and reversal) and `PAYMENT.PAYOUTSBATCH.*` (payout status). Redelivered and unknown events are safe. A capture or refund also queues a watch for that freelancer.
-- Job queues: webhooks, embeddings (service pages and freelancers), payouts (send and poll), watch (daily proactive check per freelancer).
-- Timers: payout reconcile every minute (every `SCHEDULED` or `PROCESSING` payout has a live job); **auto-release sweep every 60 s** (`sweepAutoReleases`: guarded, idempotent, `SYSTEM` actor, audited, plain code); embedding backfill on boot.
-- Proactive agents (Treasury and Projects detectors, then an agent investigation) write `findings` with a partial unique index per (freelancer, fingerprint). `PROACTIVE_AGENTS=off` disables them.
+- Job queues: webhooks, payouts (send and poll), watch (daily proactive check per freelancer).
+- Timers: payout reconcile every minute (every `SCHEDULED` or `PROCESSING` payout has a live job); **auto-release sweep every 60 s** (`sweepAutoReleases`: guarded, idempotent, `SYSTEM` actor, audited, plain code).
+- Proactive agent (freelancer detectors, then a Freelancer Agent investigation) writes `findings` with a partial unique index per (freelancer, fingerprint). `PROACTIVE_AGENTS=off` disables them.
 
 ## 9. Data model (core tables)
 
 - People: `freelancers`, `clients`.
-- Catalog: `services`, `service_packages`, `service_pages` (one per market, with price, currency and embedding), `service_page_prices`, `market_rate_research`, `service_page_daily_stats`.
-- Hiring: `briefs`, `quotes`, `contracts`, `milestones`, `milestone_events` (every transition with actor).
+- Projects: `briefs` (project posts: DRAFT, OPEN, CLOSED), `quotes` (proposals), `contracts`, `milestones`, `milestone_events` (every transition with actor).
 - Money: `milestone_payments` (PayPal order and capture ids, fees, FX cost, net), `milestone_refunds`, `invoices`, `freelancer_payout_schedules`, `freelancer_payouts`.
 - Messaging: `threads`, `thread_messages`, `attachments` (files on local disk under `UPLOAD_DIR`).
 - Platform: `agent_sessions`, `agent_actions` (agent, tool, input, output, status, decided_by), `findings`, `webhook_events`.
 
-One migration, `init_globalgig`, creates everything (the GlobalCart tables and migrations were dropped and squashed).
+One migration, `init_globalgig`, creates everything (the GlobalCart tables and migrations were dropped and squashed, and the service-listing tables were later removed from it).
 
 ## 10. Security
 

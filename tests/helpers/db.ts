@@ -1,7 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { prisma } from "@/server/db";
-import type { MilestoneState, PackageTier } from "@/generated/prisma/enums";
-import { getMarket } from "@/server/domain/markets";
+import type { MilestoneState } from "@/generated/prisma/enums";
 
 /** Empties every table in the test database (all but Prisma's own bookkeeping). */
 export async function resetDb(): Promise<void> {
@@ -44,40 +43,6 @@ export async function makeClient(over: Partial<{ locale: string; country: string
       company_name: over.company_name ?? null,
       tax_id: over.tax_id ?? null,
     },
-  });
-}
-
-/** A package service with Basic / Standard / Premium in the freelancer's currency. */
-export async function makeService(freelancerId: string, over: Partial<{ currency: string; code: string; title: string; prices: Record<PackageTier, number> }> = {}) {
-  const prices = over.prices ?? { BASIC: 15_000, STANDARD: 30_000, PREMIUM: 60_000 };
-  const tiers: { tier: PackageTier; days: number; revisions: number; hours: number }[] = [
-    { tier: "BASIC", days: 3, revisions: 1, hours: 3 },
-    { tier: "STANDARD", days: 5, revisions: 2, hours: 6 },
-    { tier: "PREMIUM", days: 10, revisions: 4, hours: 12 },
-  ];
-  return prisma.service.create({
-    data: {
-      freelancer_id: freelancerId,
-      code: over.code ?? `SVC-${uniq()}`,
-      title: over.title ?? "Logo design",
-      description: "A logo and brand mark, delivered as vector files.",
-      source_locale: "en-US",
-      category: "Design",
-      pricing_model: "PACKAGES",
-      currency: over.currency ?? "USD",
-      packages: {
-        create: tiers.map((t) => ({
-          tier: t.tier,
-          name: t.tier[0] + t.tier.slice(1).toLowerCase(),
-          scope: `${t.tier.toLowerCase()} scope`,
-          delivery_days: t.days,
-          revisions: t.revisions,
-          estimated_hours: t.hours,
-          base_price_minor: prices[t.tier],
-        })),
-      },
-    },
-    include: { packages: true },
   });
 }
 
@@ -161,32 +126,53 @@ export async function makeContract(
 
 export const freelancerAudit = (freelancerId: string) => ({
   actor: { type: "FREELANCER" as const, freelancerId },
-  agent: "PROJECTS" as const,
+  agent: "PROFILE" as const,
   sessionId: null,
 });
 export const clientAudit = (clientId: string) => ({ actor: { type: "CLIENT" as const, clientId }, agent: null, sessionId: null });
 
-/** A service page in one market with a price per package (market currency, minor units). */
-export async function makeServicePage(
-  service: { id: string; freelancer_id: string; packages: { id: string; tier: PackageTier }[] },
-  over: Partial<{ locale: string; title: string; description: string; status: "DRAFT" | "PUBLISHED"; prices: Partial<Record<PackageTier, number>>; hourly_rate_minor: number | null }> = {},
+
+/** A project post. OPEN by default so freelancers can see it. */
+export async function makeBrief(
+  clientId: string,
+  over: Partial<{ title: string; description: string; locale: string; skills: string[]; budget_minor: number | null; budget_currency: string | null; status: "DRAFT" | "OPEN" | "CLOSED" }> = {},
 ) {
-  const locale = over.locale ?? "en-US";
-  const prices = over.prices ?? { BASIC: 15_000, STANDARD: 30_000, PREMIUM: 60_000 };
-  return prisma.servicePage.create({
+  return prisma.brief.create({
     data: {
-      service_id: service.id,
-      freelancer_id: service.freelancer_id,
-      locale,
-      currency: getMarket(locale).currency,
-      title: over.title ?? "Logo design",
-      description: over.description ?? "A logo and brand mark, delivered as vector files.",
-      seo_title: over.title ?? "Logo design",
-      hourly_rate_minor: over.hourly_rate_minor ?? null,
-      status: over.status ?? "PUBLISHED",
-      published_at: (over.status ?? "PUBLISHED") === "PUBLISHED" ? new Date() : null,
-      prices: { create: service.packages.filter((p) => prices[p.tier] !== undefined).map((p) => ({ package_id: p.id, price_minor: prices[p.tier]! })) },
+      client_id: clientId,
+      title: over.title ?? "Logo for a bakery",
+      description: over.description ?? "We need a new logo and a small colour palette for our bakery.",
+      locale: over.locale ?? "en-US",
+      skills: over.skills ?? ["logo design"],
+      budget_minor: over.budget_minor === undefined ? 90_000 : over.budget_minor,
+      budget_currency: over.budget_currency === undefined ? (over.budget_minor === null ? null : "USD") : over.budget_currency,
+      status: over.status ?? "OPEN",
     },
-    include: { prices: true },
+  });
+}
+
+/** A proposal a freelancer sent on a project (SENT, in the project's currency). */
+export async function makeProposal(
+  freelancerId: string,
+  brief: { id: string; client_id: string; locale: string },
+  over: Partial<{ total_minor: number; currency: string; delivery_days: number; revisions: number; scope: string; status: "SENT" | "ACCEPTED" | "DECLINED" | "EXPIRED" | "WITHDRAWN" }> = {},
+) {
+  const now = new Date();
+  return prisma.quote.create({
+    data: {
+      client_id: brief.client_id,
+      freelancer_id: freelancerId,
+      brief_id: brief.id,
+      locale: brief.locale,
+      currency: over.currency ?? "USD",
+      status: over.status ?? "SENT",
+      request_message: "Project",
+      total_minor: over.total_minor ?? 60_000,
+      delivery_days: over.delivery_days ?? 14,
+      revisions: over.revisions ?? 2,
+      scope: over.scope ?? "Three concepts, one round of changes and final files.",
+      sent_at: now,
+      expires_at: new Date(now.getTime() + 14 * 86_400_000),
+    },
   });
 }

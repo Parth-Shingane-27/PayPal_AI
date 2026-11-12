@@ -12,7 +12,7 @@ import { useI18n } from "./i18n/I18nProvider";
 import { IconCheck } from "./icons";
 import { PayPalButtons } from "./PayPalButtons";
 
-type AgentName = "PROFILE" | "HIRING" | "TREASURY" | "PROJECTS";
+type AgentName = "PROFILE" | "HIRING";
 type ToolCall = { id: string; name: string; ok: boolean; output?: unknown; error?: string; durationMs: number };
 type Turn = {
   agent: AgentName;
@@ -24,7 +24,7 @@ type Turn = {
   checkoutLinks: { contract_id: string; milestone_id: string; paypal_order_id: string; approve_url: string; amount: Money }[];
   usage: { input_tokens: number; cached_input_tokens: number; output_tokens: number; thinking_tokens: number; modelCalls: number };
 };
-type ChatResult = { sessionId: string; agent: AgentName; routed: { agent: AgentName; reason: string } | null; turns: Turn[]; handoff: { from: AgentName; to: AgentName } | null };
+type ChatResult = { sessionId: string; agent: AgentName; turns: Turn[] };
 type Step = { id: string; name: string; state: "running" | "ok" | "error" };
 
 type Entry =
@@ -109,9 +109,6 @@ export function ChatPanel(props: {
   const { t } = useI18n();
   const base = useBase();
   const { agent, onResult, onBusyChange } = props;
-  const isClient = agent === "HIRING";
-  // The freelancer's routing assistant sends no agent; clients never choose one.
-  const apiAgent = agent === "ASSISTANT" || isClient ? null : agent;
   const agentLabel = (a: AgentName) => t(`dock.agent.${a}` as MessageKey);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [entries, setEntries] = useState<Entry[]>([]);
@@ -127,7 +124,7 @@ export function ChatPanel(props: {
   const bottom = useRef<HTMLDivElement>(null);
   // The open conversation is remembered per chat, so leaving the page and coming back resumes it.
   const storageKey = chatStorageKey(agent, props.subjectId, props.resumeKey);
-  const listQuery = isClient ? `?agent=${agent}` : apiAgent ? `?agent=${apiAgent}` : "";
+  const listQuery = `?agent=${agent}`;
 
   useEffect(() => {
     onBusyChange?.(busy);
@@ -216,8 +213,8 @@ export function ChatPanel(props: {
         body: JSON.stringify({
           text,
           session_id: sessionId,
-          agent: apiAgent,
-          ...(agent === "PROFILE" ? { service_id: props.subjectId ?? null } : {}),
+          // The project the person is looking at, so "this project" means something to the assistant.
+          project_id: props.subjectId ?? null,
         }),
       });
       if (!res.ok || !res.body) {
@@ -231,8 +228,6 @@ export function ChatPanel(props: {
         else if (event === "text_delta") pushDelta(String(d.text ?? ""));
         else if (event === "tool_started") setSteps((s) => [...s, { id: String(d.id), name: String(d.name), state: "running" }]);
         else if (event === "tool_finished") setSteps((s) => s.map((x) => (x.id === d.id ? { ...x, state: d.ok ? "ok" : "error" } : x)));
-        else if (event === "routed") setEntries((e) => [...e, { kind: "notice", tone: "info", text: t("chat.passedTo", { agent: agentLabel(d.agent as AgentName) }) }]);
-        else if (event === "handoff") setEntries((e) => [...e, { kind: "notice", tone: "info", text: t("chat.passedTo", { agent: agentLabel(d.to as AgentName) }) }]);
         else if (event === "error") setEntries((e) => [...e, { kind: "notice", tone: "error", text: String(d.message) }]);
         else if (event === "result") {
           const r = data as ChatResult;

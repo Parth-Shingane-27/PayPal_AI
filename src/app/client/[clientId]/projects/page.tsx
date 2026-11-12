@@ -86,7 +86,7 @@ export default async function ProjectsPage({ params }: { params: Promise<{ clien
           <h1 className="font-display text-[2rem] leading-tight font-bold tracking-[-0.025em] md:text-[2.4rem]">{t("cl.proj.pageTitle")}</h1>
           <p className="mt-1 max-w-[65ch] text-ink-3">{t("cl.proj.intro")}</p>
         </div>
-        <Link href={`${base}/find`} className="inline-flex min-h-11 items-center rounded-md bg-accent px-5 font-semibold text-sheet">
+        <Link href={`${base}/briefs`} className="inline-flex min-h-11 items-center rounded-md bg-accent px-5 font-semibold text-sheet">
           {t("cl.dash.find")}
         </Link>
       </header>

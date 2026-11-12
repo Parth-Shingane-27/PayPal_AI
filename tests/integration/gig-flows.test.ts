@@ -13,10 +13,10 @@ import { authorizeMilestoneFunding, startMilestoneFunding } from "@/server/servi
 import { acceptDelivery as acceptDeliveryRaw, deliverMilestone, openDispute, requestRevision, startMilestone, sweepAutoReleases } from "@/server/services/gig/milestones";
 import type { GigOwner } from "@/server/services/gig/owner";
 import { proposeFreelancerPayoutSchedule, runFreelancerPayout } from "@/server/services/gig/payouts";
-import { closeQuote, requestQuote, sendQuote, viewQuote } from "@/server/services/gig/quotes";
+import { closeQuote, sendProposal, sendQuote, viewQuote } from "@/server/services/gig/quotes";
 import { proposeMilestoneRefund } from "@/server/services/gig/refunds";
 import { processWebhookEvent, storeWebhookEvent } from "@/server/services/webhooks";
-import { clientAudit, freelancerAudit, makeClient, makeContract, makeFreelancer, makeService, resetDb } from "../helpers/db";
+import { clientAudit, freelancerAudit, makeBrief, makeClient, makeContract, makeFreelancer, resetDb } from "../helpers/db";
 import { fakeFx, fakePayPal } from "../helpers/fakes";
 
 beforeEach(resetDb);
@@ -27,26 +27,28 @@ const action = (tool: string, input: unknown = {}) => ({ id: randomUUID(), tool,
 const asFreelancer = (id: string, locale = "en-US"): GigOwner => ({ type: "FREELANCER", freelancerId: id, locale });
 const asClient = (id: string, locale = "de-DE"): GigOwner => ({ type: "CLIENT", clientId: id, locale });
 
-/** An Indian logo designer selling to a German client: a de-DE page with EUR package prices. */
+/** An Indian logo designer answering a German client's project: proposals are priced in EUR. */
 async function world() {
   const f = await makeFreelancer({ name: "Priya Raman Krishnan", country: "IN", currency: "USD", locale: "en-US", timezone: "Asia/Kolkata" });
   const c = await makeClient({ name: "Jonas Weber", locale: "de-DE", country: "DE", company_name: "Nordlicht GmbH", tax_id: "DE123456789" });
-  const svc = await makeService(f.id);
-  const page = await prisma.servicePage.create({
-    data: {
-      service_id: svc.id,
-      freelancer_id: f.id,
-      locale: "de-DE",
-      currency: "EUR",
-      title: "Logodesign",
-      description: "Ein Logo als Vektordatei.",
-      seo_title: "Logodesign",
-      status: "PUBLISHED",
-      published_at: new Date(),
-      prices: { create: svc.packages.map((p) => ({ package_id: p.id, price_minor: { BASIC: 12_000, STANDARD: 30_000, PREMIUM: 60_000 }[p.tier] })) },
-    },
-  });
-  return { f, c, svc, page, fo: asFreelancer(f.id), co: asClient(c.id) };
+  return { f, c, fo: asFreelancer(f.id), co: asClient(c.id), proposals: new Map<string, string>() };
+}
+
+const PRICE = { BASIC: "120", STANDARD: "300", PREMIUM: "600" } as const;
+
+/** The proposal for a price point (created once per world), so the same price re-plans the same proposal. */
+async function proposalFor(w: Awaited<ReturnType<typeof world>>, tier: keyof typeof PRICE) {
+  const known = w.proposals.get(tier);
+  if (known) return known;
+  const brief = await makeBrief(w.c.id, { locale: "de-DE", title: `Logodesign ${tier}`, budget_minor: null });
+  const sent = await sendProposal(w.fo, brief.id, { total: PRICE[tier], delivery_days: 10, revisions: 2, scope: "Logo, palette and a short guide.", message: null });
+  w.proposals.set(tier, sent.quote_id);
+  return sent.quote_id;
+}
+
+/** Milestone plan on the proposal for a price point. */
+async function planFor(w: Awaited<ReturnType<typeof world>>, tier: keyof typeof PRICE, milestones: Parameters<typeof proposeMilestonePlan>[2], owner: GigOwner = w.co) {
+  return proposeMilestonePlan(owner, { quoteId: await proposalFor(w, tier) }, milestones);
 }
 
 /** Test shortcut: criteria signed by both sides, as if agreed before work started. */
@@ -77,10 +79,10 @@ async function fundNext(w: Awaited<ReturnType<typeof world>>, contractId: string
   return { started, captured, pp };
 }
 
-describe("package -> milestone plan -> fund -> deliver -> accept -> invoice", () => {
+describe("proposal -> milestone plan -> fund -> deliver -> accept -> invoice", () => {
   it("holds the money until the client accepts, then releases it net of fees and invoices it", async () => {
     const w = await world();
-    const plan = await proposeMilestonePlan(w.co, { servicePageId: w.page.id, tier: "STANDARD" }, [
+    const plan = await planFor(w, "STANDARD", [
       { title: "Concepts", amount: null },
       { title: "Final files", amount: null },
     ]);
@@ -177,25 +179,25 @@ describe("package -> milestone plan -> fund -> deliver -> accept -> invoice", ()
     expect(pp.calls.find((c) => c.op === "captureAuthorization")!.args[0]).toMatchObject({ actor: "CLIENT", actorId: w.c.id, freelancerId: w.f.id });
   });
 
-  it("checks that a plan adds up to the package price", async () => {
+  it("checks that a plan adds up to the proposal price", async () => {
     const w = await world();
     await expect(
-      proposeMilestonePlan(w.co, { servicePageId: w.page.id, tier: "BASIC" }, [
+      planFor(w, "BASIC", [
         { title: "A", amount: "50" },
         { title: "B", amount: "60" },
       ]),
     ).rejects.toMatchObject({ code: "INVALID_INPUT", details: { total: { amount_minor: 12_000 }, milestones_sum: { amount_minor: 11_000 }, difference: { amount_minor: 1_000 } } });
-    await expect(proposeMilestonePlan(w.co, { servicePageId: w.page.id, tier: "BASIC" }, [{ title: "A", amount: "60" }, { title: "B", amount: null }])).rejects.toThrow(
+    await expect(planFor(w, "BASIC", [{ title: "A", amount: "60" }, { title: "B", amount: null }])).rejects.toThrow(
       /every milestone, or for none/,
     );
-    // A page for another market cannot be bought from here.
-    await expect(proposeMilestonePlan(asClient(w.c.id, "en-US"), { servicePageId: w.page.id, tier: "BASIC" }, [{ title: "A", amount: null }])).rejects.toThrow(/another market/);
+    // Someone else's proposal cannot be planned on.
+    await expect(proposeMilestonePlan(asClient((await makeClient()).id), { quoteId: await proposalFor(w, "BASIC") }, [{ title: "A", amount: null }])).rejects.toThrow(/not found/);
   });
 
   it("replaces a draft plan, and lets the client cancel a draft with nothing paid", async () => {
     const w = await world();
-    const a = await proposeMilestonePlan(w.co, { servicePageId: w.page.id, tier: "PREMIUM" }, [{ title: "All", amount: null }]);
-    const b = await proposeMilestonePlan(w.co, { servicePageId: w.page.id, tier: "PREMIUM" }, [{ title: "Half", amount: "300" }, { title: "Half", amount: "300" }]);
+    const a = await planFor(w, "PREMIUM", [{ title: "All", amount: null }]);
+    const b = await planFor(w, "PREMIUM", [{ title: "Half", amount: "300" }, { title: "Half", amount: "300" }]);
     expect(await prisma.contract.count({ where: { id: a.contract_id } })).toBe(0);
     expect(b.milestones).toHaveLength(2);
     await expect(cancelDraftContract(w.co, b.contract_id)).resolves.toMatchObject({ status: "CANCELLED" });
@@ -206,7 +208,7 @@ describe("package -> milestone plan -> fund -> deliver -> accept -> invoice", ()
 describe("owner checks", () => {
   it("keeps every party to their own milestones and to their own buttons", async () => {
     const w = await world();
-    const plan = await proposeMilestonePlan(w.co, { servicePageId: w.page.id, tier: "BASIC" }, [{ title: "All", amount: null }]);
+    const plan = await planFor(w, "BASIC", [{ title: "All", amount: null }]);
     const mallory = await makeClient();
     const eve = await makeFreelancer();
     const pp = fakePayPal();
@@ -223,39 +225,36 @@ describe("owner checks", () => {
   });
 });
 
-describe("quotes", () => {
-  it("goes REQUESTED -> SENT -> plan -> funded -> ACCEPTED", async () => {
+describe("proposals", () => {
+  it("goes SENT -> plan -> funded -> ACCEPTED", async () => {
     const w = await world();
-    const brief = await prisma.brief.create({ data: { client_id: w.c.id, title: "Rebrand", description: "Rebrand our bakery chain.", locale: "de-DE" } });
-    const q = await requestQuote(w.co, { servicePageId: w.page.id, briefId: brief.id, message: "Können Sie ein Logo für unsere Bäckerei machen?" });
-    expect(q).toMatchObject({ status: "REQUESTED", total: null, already_requested: false });
-    expect((await prisma.brief.findUniqueOrThrow({ where: { id: brief.id } })).status).toBe("OPEN");
-    expect((await requestQuote(w.co, { servicePageId: w.page.id, briefId: brief.id, message: "again" })).already_requested).toBe(true);
+    const brief = await makeBrief(w.c.id, { title: "Rebrand", description: "Rebrand our bakery chain.", locale: "de-DE", budget_minor: null });
+    const mine = { total: "900", delivery_days: 10, revisions: 2, scope: "Logo, palette and a short guide.", message: null };
+    await expect(sendProposal(asFreelancer((await makeFreelancer()).id), brief.id, { ...mine, total: "-5" })).rejects.toThrow();
+    const sent = await sendProposal(w.fo, brief.id, mine);
+    expect(sent).toMatchObject({ status: "SENT", revised: false, total: { amount_minor: 90_000, currency: "EUR" } });
+    // Sending again revises the same proposal rather than adding another.
+    expect((await sendProposal(w.fo, brief.id, mine)).quote_id).toBe(sent.quote_id);
+    await expect(sendQuote(asFreelancer((await makeFreelancer()).id), sent.quote_id, mine)).rejects.toThrow(/not found/);
 
-    await expect(proposeMilestonePlan(w.co, { quoteId: q.quote_id }, [{ title: "All", amount: null }])).rejects.toThrow(/not sent a price/);
-    await expect(sendQuote(asFreelancer((await makeFreelancer()).id), q.quote_id, { total: "900", delivery_days: 10, revisions: 2, scope: "Logo, palette and a short guide." })).rejects.toThrow(
-      /not found/,
-    );
-    const sent = await sendQuote(w.fo, q.quote_id, { total: "900", delivery_days: 10, revisions: 2, scope: "Logo, palette and a short guide." });
-    expect(sent).toMatchObject({ status: "SENT", total: { amount_minor: 90_000, currency: "EUR" } });
-
-    const plan = await proposeMilestonePlan(w.co, { quoteId: q.quote_id }, [
+    const plan = await proposeMilestonePlan(w.co, { quoteId: sent.quote_id }, [
       { title: "Concepts", amount: "300" },
       { title: "Final", amount: "600" },
     ]);
     expect(plan.revisions_allowed).toBe(2);
     // Once a plan exists, the freelancer cannot change the price under it.
-    await expect(sendQuote(w.fo, q.quote_id, { total: "1200", delivery_days: 10, revisions: 2, scope: "A bigger scope than before." })).rejects.toThrow(/milestone plan/);
+    await expect(sendQuote(w.fo, sent.quote_id, { ...mine, total: "1200", scope: "A bigger scope than before." })).rejects.toThrow(/milestone plan/);
     await fundNext(w, plan.contract_id);
-    expect((await viewQuote(w.co, q.quote_id)).status).toBe("ACCEPTED");
-    await expect(closeQuote(w.co, q.quote_id)).rejects.toThrow(/already accepted/);
+    expect((await viewQuote(w.co, sent.quote_id)).status).toBe("ACCEPTED");
+    expect((await prisma.brief.findUniqueOrThrow({ where: { id: brief.id } })).status).toBe("CLOSED");
+    await expect(closeQuote(w.co, sent.quote_id)).rejects.toThrow(/already accepted/);
   });
 
-  it("treats a quote past its validity as expired", async () => {
+  it("treats a proposal past its validity as expired", async () => {
     const w = await world();
-    const q = await requestQuote(w.co, { servicePageId: w.page.id, message: "Price?" });
+    const brief = await makeBrief(w.c.id, { locale: "de-DE", budget_minor: null });
     const t0 = new Date("2026-11-01T00:00:00Z");
-    await sendQuote(w.fo, q.quote_id, { total: "100", delivery_days: 3, revisions: 1, scope: "One logo, two drafts.", valid_days: 2 }, t0);
+    const q = await sendProposal(w.fo, brief.id, { total: "100", delivery_days: 3, revisions: 1, scope: "One logo, two drafts.", message: null, valid_days: 2 }, t0);
     expect((await viewQuote(w.co, q.quote_id, new Date("2026-11-04T00:00:00Z"))).status).toBe("EXPIRED");
     await expect(proposeMilestonePlan(w.co, { quoteId: q.quote_id }, [{ title: "All", amount: null }], new Date("2026-11-04T00:00:00Z"))).rejects.toThrow(/expired/);
   });
@@ -275,7 +274,7 @@ describe("revisions and disputes", () => {
 
   it("a partial refund of a disputed milestone releases the rest, with the refund on the invoice", async () => {
     const w = await world();
-    const plan = await proposeMilestonePlan(w.co, { servicePageId: w.page.id, tier: "STANDARD" }, [{ title: "All", amount: null }]);
+    const plan = await planFor(w, "STANDARD", [{ title: "All", amount: null }]);
     await fundNext(w, plan.contract_id);
     const m = plan.milestones[0]!.milestone_id;
     await deliverMilestone(w.fo, m, {});
@@ -311,7 +310,7 @@ describe("revisions and disputes", () => {
 
   it("before acceptance, refunds out of holding must be full unless disputed; a full one ends the milestone", async () => {
     const w = await world();
-    const plan = await proposeMilestonePlan(w.co, { servicePageId: w.page.id, tier: "BASIC" }, [{ title: "All", amount: null }]);
+    const plan = await planFor(w, "BASIC", [{ title: "All", amount: null }]);
     await fundNext(w, plan.contract_id);
     const m = plan.milestones[0]!.milestone_id;
     await expect(proposeMilestoneRefund(w.f.id, { milestoneId: m, amount: "10.00", reason: "r", rationale: "r" }, freelancerAudit(w.f.id), action("propose_refund"))).rejects.toMatchObject({
@@ -329,7 +328,7 @@ describe("revisions and disputes", () => {
 
   it("a refund after release is debited from the released balance", async () => {
     const w = await world();
-    const plan = await proposeMilestonePlan(w.co, { servicePageId: w.page.id, tier: "BASIC" }, [{ title: "All", amount: null }]);
+    const plan = await planFor(w, "BASIC", [{ title: "All", amount: null }]);
     await fundNext(w, plan.contract_id);
     const m = plan.milestones[0]!.milestone_id;
     await deliverMilestone(w.fo, m, {});
@@ -361,7 +360,7 @@ describe("revisions and disputes", () => {
 describe("auto-release", () => {
   it("releases an unanswered delivery after AUTO_RELEASE_DAYS, once, as SYSTEM", async () => {
     const w = await world();
-    const plan = await proposeMilestonePlan(w.co, { servicePageId: w.page.id, tier: "BASIC" }, [{ title: "All", amount: null }]);
+    const plan = await planFor(w, "BASIC", [{ title: "All", amount: null }]);
     await fundNext(w, plan.contract_id);
     const m = plan.milestones[0]!.milestone_id;
     const t0 = new Date();
@@ -474,7 +473,7 @@ describe("payouts", () => {
 describe("webhooks", () => {
   it("funds a milestone from PAYMENT.CAPTURE.COMPLETED when the browser never came back", async () => {
     const w = await world();
-    const plan = await proposeMilestonePlan(w.co, { servicePageId: w.page.id, tier: "BASIC" }, [{ title: "All", amount: null }]);
+    const plan = await planFor(w, "BASIC", [{ title: "All", amount: null }]);
     const started = await startMilestoneFunding(w.co, plan.contract_id, clientAudit(w.c.id), { paypal: fakePayPal().api });
     const event = {
       id: `WH-${randomUUID()}`,

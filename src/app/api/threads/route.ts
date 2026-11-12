@@ -10,9 +10,9 @@ export const GET = handler(async (req) => {
   return json({ threads: await listThreads(o) });
 });
 
-/** A client asks a freelancer about a service ("Ask the freelancer"). */
+/** A client writes to a freelancer about their proposal on a project. */
 export const POST = handler(async (req) => {
   const c = await requireClient(req);
-  const b = await readBody(req, z.object({ service_page_id: z.uuid(), body: z.string().min(1).max(4000) }));
-  return json(await startThread(gigOwnerOf(c), { servicePageId: b.service_page_id, body: b.body }), 201);
+  const b = await readBody(req, z.object({ quote_id: z.uuid(), body: z.string().min(1).max(4000) }));
+  return json(await startThread(gigOwnerOf(c), { quoteId: b.quote_id, body: b.body }), 201);
 });

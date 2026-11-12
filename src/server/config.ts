@@ -2,7 +2,7 @@ import { z } from "zod";
 
 /**
  * Configuration is validated lazily, per integration: the core settings are
- * needed by everything, while PayPal / Groq / Voyage keys are only checked
+ * needed by everything, while PayPal / Groq keys are only checked
  * when that integration is actually used. A missing key therefore fails loudly
  * at the call site that needs it, not at boot.
  */
@@ -48,7 +48,6 @@ const paypalSchema = z.object({
 
 const paypalWebhookSchema = z.object({ PAYPAL_WEBHOOK_ID: nonEmpty });
 
-const voyageSchema = z.object({ VOYAGE_API_KEY: nonEmpty });
 
 const workerSchema = z.object({ WORKER_PORT: z.coerce.number().int().positive().default(4000) });
 
@@ -87,10 +86,6 @@ export function paypalConfig(): PaypalConfig {
 
 export function paypalWebhookId(): string {
   return parse("PayPal webhook", paypalWebhookSchema).PAYPAL_WEBHOOK_ID;
-}
-
-export function voyageConfig(): z.infer<typeof voyageSchema> {
-  return parse("Voyage", voyageSchema);
 }
 
 export function workerConfig(): z.infer<typeof workerSchema> {
