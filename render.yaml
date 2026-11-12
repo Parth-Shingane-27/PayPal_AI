@@ -1,4 +1,5 @@
-# Render Blueprint: web app + PayPal webhook/job worker + Redis.
+# Render Blueprint: web app + PayPal webhook/job worker. Redis is supplied via REDIS_URL
+# (free workspaces allow only one Key Value instance, so it is not created here).
 # Postgres stays on Neon (set DATABASE_URL in the Render dashboard; it is not committed).
 services:
   - type: web
@@ -17,11 +18,8 @@ services:
         value: "true" # lets judges sign in as seeded demo accounts
       - key: SESSION_SECRET
         generateValue: true
-      - key: REDIS_URL
-        fromService:
-          type: keyvalue
-          name: globalgig-redis
-          property: connectionString
+      - key: REDIS_URL # an existing Render Key Value (internal URL) or Upstash rediss:// URL
+        sync: false
       - key: PAYPAL_ENV
         value: sandbox
       - key: PAYPAL_BRAND_NAME
@@ -53,11 +51,8 @@ services:
         value: 10000 # Render's default PORT
       - key: SESSION_SECRET
         sync: false # must equal globalgig-web's value
-      - key: REDIS_URL
-        fromService:
-          type: keyvalue
-          name: globalgig-redis
-          property: connectionString
+      - key: REDIS_URL # an existing Render Key Value (internal URL) or Upstash rediss:// URL
+        sync: false
       - key: PAYPAL_ENV
         value: sandbox
       - key: APP_URL
@@ -72,8 +67,3 @@ services:
         sync: false
       - key: PAYPAL_WEBHOOK_ID
         sync: false
-
-  - type: keyvalue
-    name: globalgig-redis
-    plan: free
-    ipAllowList: [] # internal connections only
