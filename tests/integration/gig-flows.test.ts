@@ -379,7 +379,7 @@ describe("auto-release", () => {
 
   it("keeps the payment on hold when a criterion failed, even after the objection window closes", async () => {
     const w = await world();
-    const plan = await proposeMilestonePlan(w.co, { servicePageId: w.page.id, tier: "BASIC" }, [{ title: "All", amount: null }]);
+    const plan = await planFor(w, "BASIC", [{ title: "All", amount: null }]);
     const pp = fakePayPal();
     await fundNext(w, plan.contract_id, pp);
     const m = plan.milestones[0]!.milestone_id;
@@ -400,7 +400,7 @@ describe("auto-release", () => {
 
   it("does not release anything when PayPal refuses the capture", async () => {
     const w = await world();
-    const plan = await proposeMilestonePlan(w.co, { servicePageId: w.page.id, tier: "BASIC" }, [{ title: "All", amount: null }]);
+    const plan = await planFor(w, "BASIC", [{ title: "All", amount: null }]);
     const pp = fakePayPal();
     await fundNext(w, plan.contract_id, pp);
     const m = plan.milestones[0]!.milestone_id;
