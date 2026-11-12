@@ -1,0 +1,79 @@
+# Render Blueprint: web app + PayPal webhook/job worker + Redis.
+# Postgres stays on Neon (set DATABASE_URL in the Render dashboard; it is not committed).
+services:
+  - type: web
+    name: globalgig-web
+    runtime: node
+    plan: free
+    buildCommand: npm ci && npm run build
+    startCommand: npm run start
+    healthCheckPath: /
+    envVars:
+      - key: NODE_VERSION
+        value: 24
+      - key: NODE_ENV
+        value: production
+      - key: DEMO_LOGIN
+        value: "true" # lets judges sign in as seeded demo accounts
+      - key: SESSION_SECRET
+        generateValue: true
+      - key: REDIS_URL
+        fromService:
+          type: keyvalue
+          name: globalgig-redis
+          property: connectionString
+      - key: PAYPAL_ENV
+        value: sandbox
+      - key: PAYPAL_BRAND_NAME
+        value: GlobalGig
+      - key: APP_URL # set to this service's public URL, e.g. https://globalgig-web.onrender.com
+        sync: false
+      - key: DATABASE_URL # Neon pooled URL
+        sync: false
+      - key: GROQ_API_KEY
+        sync: false
+      - key: PAYPAL_CLIENT_ID
+        sync: false
+      - key: PAYPAL_CLIENT_SECRET
+        sync: false
+
+  # Worker also serves PayPal webhooks over HTTP, so it is a web service with a public URL.
+  - type: web
+    name: globalgig-worker
+    runtime: node
+    plan: free
+    buildCommand: npm ci
+    startCommand: npm run worker
+    envVars:
+      - key: NODE_VERSION
+        value: 24
+      - key: NODE_ENV
+        value: production
+      - key: WORKER_PORT
+        value: 10000 # Render's default PORT
+      - key: SESSION_SECRET
+        sync: false # must equal globalgig-web's value
+      - key: REDIS_URL
+        fromService:
+          type: keyvalue
+          name: globalgig-redis
+          property: connectionString
+      - key: PAYPAL_ENV
+        value: sandbox
+      - key: APP_URL
+        sync: false
+      - key: DATABASE_URL
+        sync: false
+      - key: GROQ_API_KEY
+        sync: false
+      - key: PAYPAL_CLIENT_ID
+        sync: false
+      - key: PAYPAL_CLIENT_SECRET
+        sync: false
+      - key: PAYPAL_WEBHOOK_ID
+        sync: false
+
+  - type: keyvalue
+    name: globalgig-redis
+    plan: free
+    ipAllowList: [] # internal connections only
